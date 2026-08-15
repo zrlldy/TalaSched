@@ -1,0 +1,86 @@
+name: PostgreSQL integration
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  row-level-security:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: talasched_testing
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d talasched_testing"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      PGPASSWORD: postgres
+      DB_CONNECTION: pgsql
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      DB_DATABASE: talasched_testing
+      DB_USERNAME: talasched_app
+      DB_PASSWORD: talasched_app
+      DB_MIGRATION_USERNAME: talasched_migrator
+      DB_MIGRATION_PASSWORD: talasched_migrator
+      DB_REQUIRE_SSL: false
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: pdo_pgsql
+          coverage: none
+
+      - name: Install PHP dependencies
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Provision database roles
+        run: |
+          psql --host="$DB_HOST" --username=postgres --dbname="$DB_DATABASE" --set=ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE talasched_owner NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+          CREATE ROLE talasched_migrator LOGIN PASSWORD 'talasched_migrator' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT BYPASSRLS;
+          CREATE ROLE talasched_app LOGIN PASSWORD 'talasched_app' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+          GRANT talasched_owner TO talasched_migrator;
+          GRANT CONNECT, CREATE ON DATABASE talasched_testing TO talasched_migrator;
+          ALTER SCHEMA public OWNER TO talasched_migrator;
+          SQL
+
+      - name: Migrate as the table-owning role
+        env:
+          DB_USERNAME: talasched_migrator
+          DB_PASSWORD: talasched_migrator
+        run: php artisan migrate:fresh --force --no-interaction
+
+      - name: Grant application-role access
+        run: |
+          psql --host="$DB_HOST" --username=postgres --dbname="$DB_DATABASE" --set=ON_ERROR_STOP=1 <<'SQL'
+          REASSIGN OWNED BY talasched_migrator TO talasched_owner;
+          GRANT USAGE, CREATE ON SCHEMA public TO talasched_migrator;
+          GRANT USAGE ON SCHEMA public TO talasched_app;
+          GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO talasched_app;
+          GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO talasched_app;
+          SQL
+
+      - name: Verify production database baseline
+        run: php artisan database:verify-production --no-interaction
+
+      - name: Run PostgreSQL integration tests
+        run: composer test:postgresql

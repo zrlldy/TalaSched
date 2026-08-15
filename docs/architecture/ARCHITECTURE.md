@@ -20,10 +20,12 @@ The architecture uses one canonical schedule source to derive teacher, student-g
 - Rename the starter kit's Team domain to Organization and remove personal teams.
 - A user can belong to multiple organizations; teachers join organizations through invitations and do not receive isolated personal school accounts.
 - Subscriptions and capabilities belong to organizations.
-- Use one shared PostgreSQL schema with `organization_id` on every tenant-owned row.
-- Use composite tenant-safe foreign keys, organization query scopes, scoped route binding, policies, and PostgreSQL row-level security as layered controls.
+- Use one shared PostgreSQL schema with `organization_id` on every organization-owned row.
+- Use composite tenant-safe foreign keys, organization query scopes, scoped route binding, policies, and PostgreSQL row-level security as layered controls for domain tenant data.
+- Treat memberships and invitations as identity control-plane tables because organization discovery and invitation acceptance occur before a single tenant context exists; keep them outside organization-only RLS and require actor- or organization-qualified application queries as defined by ADR 0003.
 - The application database role must not have `BYPASSRLS`. Missing tenant context denies access.
-- HTTP actions, queue jobs, and CLI operations establish explicit tenant context before accessing tenant tables.
+- PostgreSQL 17 is the production database baseline. Runtime, owner, and migrator role privileges follow ADR 0004, and production readiness is verified with `php artisan database:verify-production`.
+- HTTP actions, queue jobs, and CLI operations establish explicit tenant context before accessing domain tenant tables.
 
 ### Academic structure
 

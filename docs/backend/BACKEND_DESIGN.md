@@ -10,7 +10,7 @@ The backend must guarantee three properties before convenience or optimization:
 2. no committed timetable version can contain an invalid or double-booked resource reservation;
 3. published schedules and their approvals remain historically reproducible.
 
-Laravel remains the application boundary, PostgreSQL the authoritative store, Redis the cache/lock/queue support, and S3-compatible storage the private artifact store.
+Laravel remains the application boundary, PostgreSQL 17 the authoritative store, Redis the cache/lock/queue support, and S3-compatible storage the private artifact store. PostgreSQL production role privileges, UTC session requirements, TLS expectations, and readiness verification are defined by [ADR 0004](../decisions/0004-postgresql-production-baseline.md).
 
 ## Module ownership and dependencies
 
@@ -67,7 +67,9 @@ Do not introduce generic repositories over Eloquent. Use ports only at replaceab
 5. Authorize the action through a policy and academic-unit permission scope.
 6. Clear tenant context in a `finally` block after the response.
 
-An absent tenant context must deny access to tenant tables under RLS. The database application role must not own RLS-protected tables and must not have `BYPASSRLS`.
+An absent tenant context must deny access to domain tenant tables under RLS. The database application role must not own RLS-protected tables and must not have `BYPASSRLS`. `php artisan database:verify-production` must pass against PostgreSQL before the database is considered production-ready.
+
+`organization_members` and `organization_invitations` are identity control-plane tables under [ADR 0003](../decisions/0003-identity-control-plane-rls-boundary.md). They remain organization-owned and require tenant-safe keys, but are excluded from organization-only RLS because membership discovery, organization switching, and invitation acceptance occur before one organization context exists. Queries against them must always be qualified by the authenticated actor, normalized recipient identity, or an already-authorized organization.
 
 ### Jobs and commands
 

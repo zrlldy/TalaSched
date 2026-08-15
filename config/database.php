@@ -96,7 +96,31 @@ return [
             'prefix' => '',
             'prefix_indexes' => true,
             'search_path' => 'public',
+            'application_name' => env('DB_APPLICATION_NAME', Str::slug((string) env('APP_NAME', 'laravel'), '_')),
+            'timezone' => env('DB_TIMEZONE', 'UTC'),
             'sslmode' => env('DB_SSLMODE', 'prefer'),
+            'sslcert' => env('DB_SSLCERT'),
+            'sslkey' => env('DB_SSLKEY'),
+            'sslrootcert' => env('DB_SSLROOTCERT'),
+        ],
+
+        'pgsql_migrator' => [
+            'driver' => 'pgsql',
+            'host' => env('DB_HOST', '127.0.0.1'),
+            'port' => env('DB_PORT', '5432'),
+            'database' => env('DB_DATABASE', 'laravel'),
+            'username' => env('DB_MIGRATION_USERNAME'),
+            'password' => env('DB_MIGRATION_PASSWORD'),
+            'charset' => env('DB_CHARSET', 'utf8'),
+            'prefix' => '',
+            'prefix_indexes' => true,
+            'search_path' => 'public',
+            'application_name' => env('DB_MIGRATION_APPLICATION_NAME', Str::slug((string) env('APP_NAME', 'laravel'), '_').'_migrator'),
+            'timezone' => env('DB_TIMEZONE', 'UTC'),
+            'sslmode' => env('DB_SSLMODE', 'prefer'),
+            'sslcert' => env('DB_SSLCERT'),
+            'sslkey' => env('DB_SSLKEY'),
+            'sslrootcert' => env('DB_SSLROOTCERT'),
         ],
 
         'sqlsrv' => [
@@ -114,6 +138,16 @@ return [
             // 'trust_server_certificate' => env('DB_TRUST_SERVER_CERTIFICATE', 'false'),
         ],
 
+    ],
+
+    'production' => [
+        'postgresql_major_version' => 17,
+        'require_ssl' => env('DB_REQUIRE_SSL', true),
+        'timezone' => 'UTC',
+        'rls_exempt_tables' => [
+            'organization_invitations',
+            'organization_members',
+        ],
     ],
 
     /*

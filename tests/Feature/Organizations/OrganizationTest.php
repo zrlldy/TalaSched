@@ -91,9 +91,8 @@ test('organization slug uses next available suffix', function () {
 
 test('the organization edit page can be rendered', function () {
     $user = User::factory()->create();
-    $organization = Organization::factory()->create();
+    $organization = Organization::factory()->ownedBy($user)->create();
 
-    $organization->members()->attach($user, ['role' => OrganizationRole::Owner->value]);
     $membership = $organization->memberships()->where('user_id', $user->id)->firstOrFail();
 
     $response = $this
