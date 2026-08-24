@@ -25,3 +25,90 @@ export type ScheduleIssue = {
     acknowledgement_required?: boolean;
     configuration_id?: string | null;
 };
+
+export type TimetableViewScope =
+    | 'organization'
+    | 'teacher'
+    | 'student_group'
+    | 'room'
+    | 'unit';
+
+export type TimetableViewResource = {
+    id: string;
+    name: string;
+    type: string;
+    role: string;
+};
+
+export type TimetableViewException = {
+    id: string;
+    date: string;
+    action: 'cancelled' | 'rescheduled' | 'replaced';
+    starts_at_minute: number | null;
+    ends_at_minute: number | null;
+    reason: string | null;
+    resources: TimetableViewResource[];
+};
+
+export type TimetableViewEntry = {
+    id: string;
+    logical_id: string;
+    weekday: number;
+    date: string | null;
+    status: 'scheduled' | 'cancelled' | 'rescheduled' | 'replaced';
+    starts_at_minute: number | null;
+    ends_at_minute: number | null;
+    delivery_mode: string;
+    notes: string | null;
+    lock_version: number;
+    offering: {
+        component: { id: string; name: string; kind: string };
+        offering: {
+            id: string;
+            code: string | null;
+            expected_enrollment: number;
+        };
+        subject: { id: string; code: string | null; name: string };
+        student_group: {
+            id: string;
+            code: string;
+            name: string;
+            academic_unit: { id: string; name: string; code: string | null };
+        };
+        owning_unit: { id: string; name: string; code: string | null } | null;
+    };
+    resources: TimetableViewResource[];
+    exceptions: TimetableViewException[];
+};
+
+export type TimetableView = {
+    scope: TimetableViewScope;
+    date: string | null;
+    context: {
+        organization: {
+            id: string;
+            name: string;
+            slug: string;
+            timezone: string;
+        };
+        timetable: {
+            id: string;
+            name: string;
+            timezone: string;
+            scheduling_granularity: number;
+        };
+        period: {
+            id: string;
+            name: string;
+            starts_on: string;
+            ends_on: string;
+        };
+        version: {
+            id: string;
+            number: number;
+            status: TimetableVersionStatus;
+            lock_version: number;
+        };
+    };
+    entries: TimetableViewEntry[];
+};

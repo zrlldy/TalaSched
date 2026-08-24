@@ -7,6 +7,7 @@ import DeleteOrganizationModal from '@/components/DeleteOrganizationModal.vue';
 import Heading from '@/components/Heading.vue';
 import InputError from '@/components/InputError.vue';
 import InviteOrganizationMemberModal from '@/components/InviteOrganizationMemberModal.vue';
+import OrganizationRoleManager from '@/components/OrganizationRoleManager.vue';
 import RemoveOrganizationMemberModal from '@/components/RemoveOrganizationMemberModal.vue';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -33,7 +34,9 @@ import type {
     Organization,
     OrganizationInvitation,
     OrganizationMember,
+    OrganizationPermissionOption,
     OrganizationPermissions,
+    OrganizationRoleDefinition,
 } from '@/types';
 
 type Props = {
@@ -42,6 +45,8 @@ type Props = {
     invitations: OrganizationInvitation[];
     permissions: OrganizationPermissions;
     availableRoles: RoleOption[];
+    roles: OrganizationRoleDefinition[];
+    availablePermissions: OrganizationPermissionOption[];
 };
 
 const props = defineProps<Props>();
@@ -254,6 +259,14 @@ const confirmCancelInvitation = (invitation: OrganizationInvitation) => {
             </div>
         </div>
 
+        <OrganizationRoleManager
+            :organization="organization"
+            :roles="roles"
+            :available-permissions="availablePermissions"
+            :can-manage-roles="permissions.canManageCustomRoles"
+            :custom-roles-enabled="permissions.customRolesEnabled"
+        />
+
         <!-- Pending Invitations Section -->
         <div v-if="invitations.length > 0" class="space-y-6">
             <Heading
@@ -265,7 +278,7 @@ const confirmCancelInvitation = (invitation: OrganizationInvitation) => {
             <div class="space-y-3">
                 <div
                     v-for="invitation in invitations"
-                    :key="invitation.code"
+                    :key="invitation.id"
                     data-test="invitation-row"
                     class="flex items-center justify-between rounded-lg border p-4"
                 >

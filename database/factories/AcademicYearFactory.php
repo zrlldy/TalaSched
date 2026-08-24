@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Enums\AcademicYearStatus;
 use App\Models\AcademicYear;
 use App\Models\Organization;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -26,7 +27,17 @@ class AcademicYearFactory extends Factory
             'name' => $startsOn->format('Y').'-'.$endsOn->format('Y'),
             'starts_on' => $startsOn,
             'ends_on' => $endsOn,
-            'status' => 'active',
+            'status' => AcademicYearStatus::Draft,
         ];
+    }
+
+    /**
+     * Create the academic year inside an existing organization.
+     */
+    public function forOrganization(Organization $organization): static
+    {
+        return $this->state(fn (array $attributes): array => [
+            'organization_id' => $organization->getKey(),
+        ]);
     }
 }

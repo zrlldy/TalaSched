@@ -1,11 +1,15 @@
 <?php
 
 use App\Enums\OrganizationRole;
+use App\Enums\SubscriptionStatus;
 use App\Jobs\Middleware\UseTenantContext;
 use App\Models\Organization;
 use App\Models\OrganizationInvitation;
 use App\Models\User;
 use App\Notifications\Organizations\OrganizationInvitation as OrganizationInvitationNotification;
+use Database\Seeders\SubscriptionCatalogSeeder;
+use Illuminate\Contracts\Queue\ShouldBeEncrypted;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
 use Inertia\Testing\AssertableInertia as Assert;
 
@@ -13,9 +17,7 @@ test('organization invitations can be created', function () {
     Notification::fake();
 
     $owner = User::factory()->create();
-    $organization = Organization::factory()->create();
-
-    $organization->members()->attach($owner, ['role' => OrganizationRole::Owner->value]);
+    $organization = Organization::factory()->ownedBy($owner)->create();
 
     $response = $this
         ->actingAs($owner)
@@ -33,12 +35,43 @@ test('organization invitations can be created', function () {
     ]);
 });
 
+test('organization invitations cannot grant ownership', function () {
+    Notification::fake();
+
+    $owner = User::factory()->create();
+    $organization = Organization::factory()->ownedBy($owner)->create();
+
+    $response = $this
+        ->actingAs($owner)
+        ->post(route('organizations.invitations.store', $organization), [
+            'email' => 'invited@example.com',
+            'role' => OrganizationRole::Owner->value,
+        ]);
+
+    $response->assertSessionHasErrors('role');
+
+    expect(OrganizationInvitation::query()
+        ->where('organization_id', $organization->id)
+        ->exists())->toBeFalse();
+});
+
+test('invitation tokens are hashed and public identifiers are used for routes', function () {
+    $invitation = OrganizationInvitation::factory()->create();
+    $token = $invitation->plainTextToken();
+    $storedInvitation = DB::table('organization_invitations')->where('id', $invitation->id)->first();
+
+    expect($invitation->getRouteKey())->toBe($invitation->public_id)
+        ->and($storedInvitation->token_hash)->toBe(OrganizationInvitation::hashToken($token))
+        ->and($storedInvitation->token_hash)->not->toBe($token)
+        ->and(property_exists($storedInvitation, 'code'))->toBeFalse()
+        ->and(OrganizationInvitation::findByToken($token)?->is($invitation))->toBeTrue()
+        ->and(OrganizationInvitation::findByToken('invalid-token'))->toBeNull();
+});
+
 test('invitation email for existing users uses login route', function () {
     $owner = User::factory()->create();
     $invitedUser = User::factory()->create(['email' => 'invited@example.com']);
-    $organization = Organization::factory()->create();
-
-    $organization->members()->attach($owner, ['role' => OrganizationRole::Owner->value]);
+    $organization = Organization::factory()->ownedBy($owner)->create();
 
     $invitation = OrganizationInvitation::factory()->create([
         'organization_id' => $organization->id,
@@ -46,17 +79,15 @@ test('invitation email for existing users uses login route', function () {
         'invited_by' => $owner->id,
     ]);
 
-    $mail = (new OrganizationInvitationNotification($invitation))->toMail($invitedUser);
+    $mail = (new OrganizationInvitationNotification($invitation, $invitation->plainTextToken()))->toMail($invitedUser);
 
-    expect($mail->actionUrl)->toBe(route('login', ['invitation' => $invitation->code]));
+    expect($mail->actionUrl)->toBe(route('login', ['invitation' => $invitation->plainTextToken()]));
     $this->assertStringContainsString('dashboard', implode(' ', $mail->introLines));
 });
 
 test('invitation email for unknown users uses login route', function () {
     $owner = User::factory()->create();
-    $organization = Organization::factory()->create();
-
-    $organization->members()->attach($owner, ['role' => OrganizationRole::Owner->value]);
+    $organization = Organization::factory()->ownedBy($owner)->create();
 
     $invitation = OrganizationInvitation::factory()->create([
         'organization_id' => $organization->id,
@@ -64,18 +95,19 @@ test('invitation email for unknown users uses login route', function () {
         'invited_by' => $owner->id,
     ]);
 
-    $mail = (new OrganizationInvitationNotification($invitation))->toMail((object) []);
+    $mail = (new OrganizationInvitationNotification($invitation, $invitation->plainTextToken()))->toMail((object) []);
 
-    expect($mail->actionUrl)->toBe(route('login', ['invitation' => $invitation->code]));
+    expect($mail->actionUrl)->toBe(route('login', ['invitation' => $invitation->plainTextToken()]));
     $this->assertStringContainsString('log in', strtolower(implode(' ', $mail->introLines)));
 });
 
 test('queued invitation notifications carry public tenant context middleware', function () {
     $invitation = OrganizationInvitation::factory()->create();
-    $notification = new OrganizationInvitationNotification($invitation);
+    $notification = new OrganizationInvitationNotification($invitation, $invitation->plainTextToken());
     $middleware = $notification->middleware((object) [], 'mail');
 
     expect($notification->organizationPublicId)->toBe($invitation->organization->public_id)
+        ->and($notification)->toBeInstanceOf(ShouldBeEncrypted::class)
         ->and($middleware)->toHaveCount(1)
         ->and($middleware[0])->toBeInstanceOf(UseTenantContext::class)
         ->and($middleware[0]->organizationPublicId)->toBe($invitation->organization->public_id);
@@ -86,9 +118,8 @@ test('organization invitations can be created by admins', function () {
 
     $owner = User::factory()->create();
     $admin = User::factory()->create();
-    $organization = Organization::factory()->create();
+    $organization = Organization::factory()->ownedBy($owner)->create();
 
-    $organization->members()->attach($owner, ['role' => OrganizationRole::Owner->value]);
     $organization->members()->attach($admin, ['role' => OrganizationRole::Admin->value]);
 
     $response = $this
@@ -106,9 +137,8 @@ test('existing organization members cannot be invited', function () {
 
     $owner = User::factory()->create();
     $member = User::factory()->create(['email' => 'member@example.com']);
-    $organization = Organization::factory()->create();
+    $organization = Organization::factory()->ownedBy($owner)->create();
 
-    $organization->members()->attach($owner, ['role' => OrganizationRole::Owner->value]);
     $organization->members()->attach($member, ['role' => OrganizationRole::Member->value]);
 
     $response = $this
@@ -125,9 +155,7 @@ test('duplicate invitations cannot be created', function () {
     Notification::fake();
 
     $owner = User::factory()->create();
-    $organization = Organization::factory()->create();
-    $organization->members()->attach($owner, ['role' => OrganizationRole::Owner->value]);
-
+    $organization = Organization::factory()->ownedBy($owner)->create();
     OrganizationInvitation::factory()->create([
         'organization_id' => $organization->id,
         'email' => 'invited@example.com',
@@ -147,9 +175,8 @@ test('duplicate invitations cannot be created', function () {
 test('organization invitations cannot be created by members', function () {
     $owner = User::factory()->create();
     $member = User::factory()->create();
-    $organization = Organization::factory()->create();
+    $organization = Organization::factory()->ownedBy($owner)->create();
 
-    $organization->members()->attach($owner, ['role' => OrganizationRole::Owner->value]);
     $organization->members()->attach($member, ['role' => OrganizationRole::Member->value]);
 
     $response = $this
@@ -164,9 +191,7 @@ test('organization invitations cannot be created by members', function () {
 
 test('organization invitations can be cancelled by owners', function () {
     $owner = User::factory()->create();
-    $organization = Organization::factory()->create();
-
-    $organization->members()->attach($owner, ['role' => OrganizationRole::Owner->value]);
+    $organization = Organization::factory()->ownedBy($owner)->create();
 
     $invitation = OrganizationInvitation::factory()->create([
         'organization_id' => $organization->id,
@@ -185,11 +210,21 @@ test('organization invitations can be cancelled by owners', function () {
 });
 
 test('organization invitations can be accepted', function () {
+    $this->seed(SubscriptionCatalogSeeder::class);
     $owner = User::factory()->create();
     $invitedUser = User::factory()->create(['email' => 'invited@example.com']);
-    $organization = Organization::factory()->create();
+    $organization = Organization::factory()->ownedBy($owner)->create();
+    $timestamp = now();
+    $starterPlanId = DB::table('plans')->where('code', 'starter')->value('id');
 
-    $organization->members()->attach($owner, ['role' => OrganizationRole::Owner->value]);
+    DB::table('organization_subscriptions')->insert([
+        'organization_id' => $organization->id,
+        'plan_id' => $starterPlanId,
+        'status' => SubscriptionStatus::Active->value,
+        'period_starts_at' => $timestamp,
+        'created_at' => $timestamp,
+        'updated_at' => $timestamp,
+    ]);
 
     $invitation = OrganizationInvitation::factory()->create([
         'organization_id' => $organization->id,
@@ -207,14 +242,21 @@ test('organization invitations can be accepted', function () {
 
     expect($invitedUser->fresh()->belongsToOrganization($organization))->toBeTrue();
     expect($invitation->fresh()->accepted_at)->not->toBeNull();
+
+    $maxMembersCapabilityId = DB::table('capabilities')
+        ->where('code', 'max_members')
+        ->value('id');
+
+    expect(DB::table('usage_counters')
+        ->where('organization_id', $organization->id)
+        ->where('capability_id', $maxMembersCapabilityId)
+        ->value('quantity'))->toBe(2);
 });
 
 test('unaffiliated users can review pending invitations on the organizations page', function () {
     $owner = User::factory()->create();
     $invitedUser = User::factory()->create(['email' => 'invited@example.com']);
-    $organization = Organization::factory()->create(['name' => 'Inviting Organization']);
-
-    $organization->members()->attach($owner, ['role' => OrganizationRole::Owner->value]);
+    $organization = Organization::factory()->ownedBy($owner)->create(['name' => 'Inviting Organization']);
 
     $invitation = OrganizationInvitation::factory()->create([
         'organization_id' => $organization->id,
@@ -229,7 +271,7 @@ test('unaffiliated users can review pending invitations on the organizations pag
             ->component('organizations/Index')
             ->has('organizations', 0)
             ->has('pendingInvitations', 1)
-            ->where('pendingInvitations.0.code', $invitation->code)
+            ->where('pendingInvitations.0.id', $invitation->public_id)
             ->where('pendingInvitations.0.organization.name', 'Inviting Organization'),
         );
 });
@@ -237,9 +279,7 @@ test('unaffiliated users can review pending invitations on the organizations pag
 test('organization invitations can be declined by the invited user', function () {
     $owner = User::factory()->create();
     $invitedUser = User::factory()->create(['email' => 'invited@example.com']);
-    $organization = Organization::factory()->create();
-
-    $organization->members()->attach($owner, ['role' => OrganizationRole::Owner->value]);
+    $organization = Organization::factory()->ownedBy($owner)->create();
 
     $invitation = OrganizationInvitation::factory()->create([
         'organization_id' => $organization->id,
@@ -261,9 +301,7 @@ test('organization invitations can be declined by the invited user', function ()
 test('organization invitations cannot be declined by uninvited user', function () {
     $owner = User::factory()->create();
     $uninvitedUser = User::factory()->create(['email' => 'uninvited@example.com']);
-    $organization = Organization::factory()->create();
-
-    $organization->members()->attach($owner, ['role' => OrganizationRole::Owner->value]);
+    $organization = Organization::factory()->ownedBy($owner)->create();
 
     $invitation = OrganizationInvitation::factory()->create([
         'organization_id' => $organization->id,
@@ -285,9 +323,7 @@ test('organization invitations cannot be declined by uninvited user', function (
 test('accepted organization invitations cannot be declined', function () {
     $owner = User::factory()->create();
     $invitedUser = User::factory()->create(['email' => 'invited@example.com']);
-    $organization = Organization::factory()->create();
-
-    $organization->members()->attach($owner, ['role' => OrganizationRole::Owner->value]);
+    $organization = Organization::factory()->ownedBy($owner)->create();
 
     $invitation = OrganizationInvitation::factory()->accepted()->create([
         'organization_id' => $organization->id,
@@ -309,9 +345,7 @@ test('accepted organization invitations cannot be declined', function () {
 test('organization invitations cannot be accepted by uninvited user', function () {
     $owner = User::factory()->create();
     $uninvitedUser = User::factory()->create(['email' => 'uninvited@example.com']);
-    $organization = Organization::factory()->create();
-
-    $organization->members()->attach($owner, ['role' => OrganizationRole::Owner->value]);
+    $organization = Organization::factory()->ownedBy($owner)->create();
 
     $invitation = OrganizationInvitation::factory()->create([
         'organization_id' => $organization->id,
@@ -331,9 +365,7 @@ test('organization invitations cannot be accepted by uninvited user', function (
 test('expired invitations cannot be accepted', function () {
     $owner = User::factory()->create();
     $invitedUser = User::factory()->create(['email' => 'invited@example.com']);
-    $organization = Organization::factory()->create();
-
-    $organization->members()->attach($owner, ['role' => OrganizationRole::Owner->value]);
+    $organization = Organization::factory()->ownedBy($owner)->create();
 
     $invitation = OrganizationInvitation::factory()->expired()->create([
         'organization_id' => $organization->id,

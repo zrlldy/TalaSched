@@ -26,4 +26,14 @@ class AcademicUnitTypeFactory extends Factory
             'display_order' => fake()->numberBetween(0, 20),
         ];
     }
+
+    /**
+     * Create the unit type inside an existing organization.
+     */
+    public function forOrganization(Organization $organization): static
+    {
+        return $this->state(fn (array $attributes): array => [
+            'organization_id' => $organization->getKey(),
+        ]);
+    }
 }

@@ -2,11 +2,14 @@
 
 namespace App\Http\Middleware;
 
+use App\Subscriptions\CapabilityGuard;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 
 class HandleInertiaRequests extends Middleware
 {
+    public function __construct(private CapabilityGuard $capabilities) {}
+
     /**
      * The root template that's loaded on the first page visit.
      *
@@ -46,6 +49,9 @@ class HandleInertiaRequests extends Middleware
             'sidebarOpen' => ! $request->hasCookie('sidebar_state') || $request->cookie('sidebar_state') === 'true',
             'currentOrganization' => fn () => $user?->currentOrganization ? $user->toUserOrganization($user->currentOrganization) : null,
             'organizations' => fn () => $user?->toUserOrganizations(includeCurrent: true) ?? [],
+            'entitlements' => fn (): array => $user?->currentOrganization
+                ? $this->capabilities->values($user->currentOrganization)
+                : [],
         ];
     }
 }

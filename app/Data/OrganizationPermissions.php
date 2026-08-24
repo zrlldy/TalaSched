@@ -12,6 +12,8 @@ readonly class OrganizationPermissions
         public bool $canRemoveMember,
         public bool $canCreateInvitation,
         public bool $canCancelInvitation,
+        public bool $canManageCustomRoles,
+        public bool $customRolesEnabled,
     ) {
         //
     }

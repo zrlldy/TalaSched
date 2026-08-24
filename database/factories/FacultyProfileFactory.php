@@ -2,8 +2,10 @@
 
 namespace Database\Factories;
 
+use App\Enums\FacultyEmploymentType;
 use App\Enums\ResourceType;
 use App\Models\FacultyProfile;
+use App\Models\Organization;
 use App\Models\SchedulingResource;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
@@ -24,13 +26,31 @@ class FacultyProfileFactory extends Factory
                 'type' => ResourceType::Faculty,
                 'name' => fake()->name(),
             ]),
-            'organization_id' => fn (array $attributes): int => SchedulingResource::findOrFail($attributes['scheduling_resource_id'])->organization_id,
+            'organization_id' => fn (array $attributes): int => SchedulingResource::query()
+                ->findOrFail((int) $attributes['scheduling_resource_id'])
+                ->organization_id,
             'user_id' => null,
             'employee_number' => fake()->unique()->bothify('FAC-####'),
             'position' => fake()->randomElement(['Teacher', 'Instructor', 'Professor']),
-            'employment_type' => fake()->randomElement(['full_time', 'part_time', 'contract']),
+            'employment_type' => fake()->randomElement(FacultyEmploymentType::cases()),
             'maximum_daily_minutes' => 360,
             'maximum_weekly_minutes' => 1200,
         ];
+    }
+
+    public function forOrganization(Organization $organization): static
+    {
+        return $this->state([
+            'organization_id' => $organization->getKey(),
+            'scheduling_resource_id' => SchedulingResource::factory()->forOrganization($organization)->faculty(),
+        ]);
+    }
+
+    public function forResource(SchedulingResource $resource): static
+    {
+        return $this->state([
+            'scheduling_resource_id' => $resource->getKey(),
+            'organization_id' => $resource->organization_id,
+        ]);
     }
 }

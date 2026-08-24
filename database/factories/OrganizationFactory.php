@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Actions\Organizations\ProvisionOrganizationAuthorization;
 use App\Enums\OrganizationRole;
 use App\Models\Organization;
 use App\Models\User;
@@ -39,6 +40,8 @@ class OrganizationFactory extends Factory
                 ['user_id' => $organization->owner_user_id],
                 ['role' => OrganizationRole::Owner],
             );
+
+            app(ProvisionOrganizationAuthorization::class)->handle($organization);
         });
     }
 

@@ -19,25 +19,31 @@ type Props = {
 const props = defineProps<Props>();
 
 const open = ref(true);
-const processingCode = ref<string | null>(null);
+const processingId = ref<string | null>(null);
 
 const acceptInvitation = (invitation: DashboardInvitation) => {
-    router.visit(OrganizationInvitationController.accept(invitation), {
-        onStart: () => (processingCode.value = invitation.code),
-        onFinish: () => (processingCode.value = null),
-    });
+    router.visit(
+        OrganizationInvitationController.accept({ public_id: invitation.id }),
+        {
+            onStart: () => (processingId.value = invitation.id),
+            onFinish: () => (processingId.value = null),
+        },
+    );
 };
 
 const declineInvitation = (invitation: DashboardInvitation) => {
-    router.visit(OrganizationInvitationController.decline(invitation), {
-        onStart: () => (processingCode.value = invitation.code),
-        onFinish: () => (processingCode.value = null),
-        onSuccess: () => {
-            if (props.invitations.length === 1) {
-                open.value = false;
-            }
+    router.visit(
+        OrganizationInvitationController.decline({ public_id: invitation.id }),
+        {
+            onStart: () => (processingId.value = invitation.id),
+            onFinish: () => (processingId.value = null),
+            onSuccess: () => {
+                if (props.invitations.length === 1) {
+                    open.value = false;
+                }
+            },
         },
-    });
+    );
 };
 </script>
 
@@ -55,7 +61,7 @@ const declineInvitation = (invitation: DashboardInvitation) => {
             <div class="grid gap-4">
                 <div
                     v-for="invitation in props.invitations"
-                    :key="invitation.code"
+                    :key="invitation.id"
                     data-test="pending-invitation-row"
                     class="rounded-lg border p-4"
                 >
@@ -73,7 +79,7 @@ const declineInvitation = (invitation: DashboardInvitation) => {
                         <Button
                             variant="secondary"
                             data-test="pending-invitation-decline"
-                            :disabled="processingCode === invitation.code"
+                            :disabled="processingId === invitation.id"
                             @click="declineInvitation(invitation)"
                         >
                             Decline
@@ -81,7 +87,7 @@ const declineInvitation = (invitation: DashboardInvitation) => {
 
                         <Button
                             data-test="pending-invitation-accept"
-                            :disabled="processingCode === invitation.code"
+                            :disabled="processingId === invitation.id"
                             @click="acceptInvitation(invitation)"
                         >
                             Accept

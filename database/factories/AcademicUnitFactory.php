@@ -4,6 +4,7 @@ namespace Database\Factories;
 
 use App\Models\AcademicUnit;
 use App\Models\AcademicUnitType;
+use App\Models\Organization;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -27,5 +28,38 @@ class AcademicUnitFactory extends Factory
             'active_from' => null,
             'active_until' => null,
         ];
+    }
+
+    /**
+     * Create the unit with an existing unit type and its organization.
+     */
+    public function forType(AcademicUnitType $type): static
+    {
+        return $this->state(fn (array $attributes): array => [
+            'academic_unit_type_id' => $type->getKey(),
+            'organization_id' => $type->organization_id,
+        ]);
+    }
+
+    /**
+     * Create the unit and its generated type inside an existing organization.
+     */
+    public function forOrganization(Organization $organization): static
+    {
+        return $this->state([
+            'organization_id' => $organization->getKey(),
+            'academic_unit_type_id' => AcademicUnitType::factory()->forOrganization($organization),
+        ]);
+    }
+
+    /**
+     * Create the unit under an existing parent unit.
+     */
+    public function under(AcademicUnit $parent): static
+    {
+        return $this->state(fn (array $attributes): array => [
+            'organization_id' => $parent->organization_id,
+            'parent_id' => $parent->getKey(),
+        ]);
     }
 }

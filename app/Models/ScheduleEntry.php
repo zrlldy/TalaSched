@@ -10,29 +10,40 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+/** @property string $public_id */
 #[Fillable(['organization_id', 'timetable_version_id', 'offering_component_id', 'logical_id', 'weekday', 'starts_at_minute', 'ends_at_minute', 'delivery_mode', 'notes', 'lock_version'])]
 class ScheduleEntry extends Model
 {
     /** @use HasFactory<ScheduleEntryFactory> */
     use HasFactory, HasPublicId;
 
+    /** @return BelongsTo<TimetableVersion, $this> */
     public function version(): BelongsTo
     {
         return $this->belongsTo(TimetableVersion::class, 'timetable_version_id');
     }
 
+    /** @return BelongsTo<OfferingComponent, $this> */
     public function offeringComponent(): BelongsTo
     {
         return $this->belongsTo(OfferingComponent::class);
     }
 
+    /** @return HasMany<ScheduleEntryResource, $this> */
     public function resources(): HasMany
     {
         return $this->hasMany(ScheduleEntryResource::class);
     }
 
+    /** @return HasMany<ScheduleReservation, $this> */
     public function reservations(): HasMany
     {
         return $this->hasMany(ScheduleReservation::class);
+    }
+
+    /** @return HasMany<ScheduleEntryException, $this> */
+    public function exceptions(): HasMany
+    {
+        return $this->hasMany(ScheduleEntryException::class);
     }
 }

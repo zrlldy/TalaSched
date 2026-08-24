@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { Link, usePage } from '@inertiajs/vue3';
-import { BookOpen, FolderGit2, LayoutGrid } from '@lucide/vue';
+import { CalendarRange, LayoutGrid, PanelsTopLeft } from '@lucide/vue';
 import { computed } from 'vue';
 import AppLogo from '@/components/AppLogo.vue';
-import NavFooter from '@/components/NavFooter.vue';
 import NavMain from '@/components/NavMain.vue';
 import NavUser from '@/components/NavUser.vue';
 import OrganizationSwitcher from '@/components/OrganizationSwitcher.vue';
@@ -17,7 +16,9 @@ import {
     SidebarMenuItem,
 } from '@/components/ui/sidebar';
 import { dashboard } from '@/routes';
+import { setup as academicSetup } from '@/routes/academic';
 import { index as organizations } from '@/routes/organizations';
+import { setup as resourceSetup } from '@/routes/resources';
 import type { NavItem } from '@/types';
 
 const page = usePage();
@@ -28,26 +29,30 @@ const dashboardUrl = computed(() =>
         : organizations().url,
 );
 
-const mainNavItems = computed<NavItem[]>(() => [
-    {
-        title: 'Dashboard',
-        href: dashboardUrl.value,
-        icon: LayoutGrid,
-    },
-]);
+const mainNavItems = computed<NavItem[]>(() => {
+    const items: NavItem[] = [
+        {
+            title: 'Dashboard',
+            href: dashboardUrl.value,
+            icon: LayoutGrid,
+        },
+    ];
 
-const footerNavItems: NavItem[] = [
-    {
-        title: 'Repository',
-        href: 'https://github.com/laravel/vue-starter-kit',
-        icon: FolderGit2,
-    },
-    {
-        title: 'Documentation',
-        href: 'https://laravel.com/docs/starter-kits#vue',
-        icon: BookOpen,
-    },
-];
+    if (page.props.currentOrganization) {
+        items.push({
+            title: 'Academic setup',
+            href: academicSetup(page.props.currentOrganization.slug).url,
+            icon: CalendarRange,
+        });
+        items.push({
+            title: 'Resources & catalog',
+            href: resourceSetup(page.props.currentOrganization.slug).url,
+            icon: PanelsTopLeft,
+        });
+    }
+
+    return items;
+});
 </script>
 
 <template>
@@ -69,12 +74,11 @@ const footerNavItems: NavItem[] = [
             </SidebarMenu>
         </SidebarHeader>
 
-        <SidebarContent>
+        <SidebarContent aria-label="Workspace navigation">
             <NavMain :items="mainNavItems" />
         </SidebarContent>
 
         <SidebarFooter>
-            <NavFooter :items="footerNavItems" />
             <NavUser />
         </SidebarFooter>
     </Sidebar>

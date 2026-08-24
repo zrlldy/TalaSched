@@ -1,5 +1,8 @@
 import type { Auth } from '@/types/auth';
-import type { Organization } from '@/types/organizations';
+import type {
+    Organization,
+    OrganizationEntitlements,
+} from '@/types/organizations';
 
 // Extend ImportMeta interface for Vite...
 declare module 'vite/client' {
@@ -22,6 +25,7 @@ declare module '@inertiajs/core' {
             sidebarOpen: boolean;
             currentOrganization: Organization | null;
             organizations: Organization[];
+            entitlements: OrganizationEntitlements;
             [key: string]: unknown;
         };
     }

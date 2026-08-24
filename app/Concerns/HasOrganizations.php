@@ -2,12 +2,19 @@
 
 namespace App\Concerns;
 
+use App\Authorization\OrganizationPermissionResolver;
 use App\Data\OrganizationPermissions;
 use App\Data\UserOrganization;
+use App\Enums\CapabilityKey;
 use App\Enums\OrganizationPermission;
 use App\Enums\OrganizationRole;
+use App\Models\AcademicUnit;
 use App\Models\Membership;
+use App\Models\MembershipRoleAssignment;
 use App\Models\Organization;
+use App\Subscriptions\CapabilityGuard;
+use App\Tenancy\TenantContext;
+use Closure;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -123,7 +130,7 @@ trait HasOrganizations
      */
     public function ownsOrganization(Organization $organization): bool
     {
-        return $this->organizationRole($organization) === OrganizationRole::Owner;
+        return $organization->owner_user_id === $this->id;
     }
 
     /**
@@ -131,10 +138,24 @@ trait HasOrganizations
      */
     public function organizationRole(Organization $organization): ?OrganizationRole
     {
-        return $this->organizationMemberships()
+        $membership = $this->organizationMemberships()
             ->where('organization_id', $organization->id)
-            ->first()
-            ?->role;
+            ->first();
+
+        if (! $membership) {
+            return null;
+        }
+
+        return $this->runWithOrganizationContext($organization, function () use ($membership): ?OrganizationRole {
+            return $membership->roleAssignments()
+                ->whereNull('academic_unit_id')
+                ->with('role')
+                ->get()
+                ->map(fn (MembershipRoleAssignment $assignment): ?OrganizationRole => OrganizationRole::tryFrom($assignment->role->code))
+                ->filter()
+                ->sortByDesc(fn (OrganizationRole $role): int => $role->level())
+                ->first();
+        });
     }
 
     /**
@@ -173,16 +194,19 @@ trait HasOrganizations
      */
     public function toOrganizationPermissions(Organization $organization): OrganizationPermissions
     {
-        $role = $this->organizationRole($organization);
+        $permissions = $this->organizationPermissionCodes($organization);
 
         return new OrganizationPermissions(
-            canUpdateOrganization: $role?->hasPermission(OrganizationPermission::UpdateOrganization) ?? false,
-            canDeleteOrganization: $role?->hasPermission(OrganizationPermission::DeleteOrganization) ?? false,
-            canAddMember: $role?->hasPermission(OrganizationPermission::AddMember) ?? false,
-            canUpdateMember: $role?->hasPermission(OrganizationPermission::UpdateMember) ?? false,
-            canRemoveMember: $role?->hasPermission(OrganizationPermission::RemoveMember) ?? false,
-            canCreateInvitation: $role?->hasPermission(OrganizationPermission::CreateInvitation) ?? false,
-            canCancelInvitation: $role?->hasPermission(OrganizationPermission::CancelInvitation) ?? false,
+            canUpdateOrganization: $permissions->contains(OrganizationPermission::UpdateOrganization->value),
+            canDeleteOrganization: $permissions->contains(OrganizationPermission::DeleteOrganization->value),
+            canAddMember: $permissions->contains(OrganizationPermission::AddMember->value),
+            canUpdateMember: $permissions->contains(OrganizationPermission::UpdateMember->value),
+            canRemoveMember: $permissions->contains(OrganizationPermission::RemoveMember->value),
+            canCreateInvitation: $permissions->contains(OrganizationPermission::CreateInvitation->value),
+            canCancelInvitation: $permissions->contains(OrganizationPermission::CancelInvitation->value),
+            canManageCustomRoles: $permissions->contains(OrganizationPermission::UpdateMember->value)
+                && app(CapabilityGuard::class)->allows($organization, CapabilityKey::CustomRoles),
+            customRolesEnabled: app(CapabilityGuard::class)->allows($organization, CapabilityKey::CustomRoles),
         );
     }
 
@@ -197,8 +221,40 @@ trait HasOrganizations
     /**
      * Determine if the user has the given permission on the organization.
      */
-    public function hasOrganizationPermission(Organization $organization, OrganizationPermission $permission): bool
+    public function hasOrganizationPermission(
+        Organization $organization,
+        OrganizationPermission $permission,
+        ?AcademicUnit $academicUnit = null,
+    ): bool {
+        return app(OrganizationPermissionResolver::class)->hasPermission($this, $organization, $permission, $academicUnit);
+    }
+
+    /**
+     * Get all permissions granted by the user's normalized unscoped roles.
+     *
+     * @return Collection<int, string>
+     */
+    protected function organizationPermissionCodes(Organization $organization, ?AcademicUnit $academicUnit = null): Collection
     {
-        return $this->organizationRole($organization)?->hasPermission($permission) ?? false;
+        return app(OrganizationPermissionResolver::class)->permissionsFor($this, $organization, $academicUnit);
+    }
+
+    /**
+     * Execute a normalized authorization read under the target tenant.
+     *
+     * @template TResult
+     *
+     * @param  Closure(): TResult  $callback
+     * @return TResult
+     */
+    protected function runWithOrganizationContext(Organization $organization, Closure $callback): mixed
+    {
+        $tenantContext = app(TenantContext::class);
+
+        if ($tenantContext->organization()?->is($organization)) {
+            return $callback();
+        }
+
+        return $tenantContext->run($organization, fn (): mixed => $callback());
     }
 }

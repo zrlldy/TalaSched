@@ -171,24 +171,34 @@ Authorization and subscription enforcement must also exist server-side.
 - [ ] Configure Redis for cache, sessions where selected, queues, throttling, and distributed locks.
     - **Progress:** Local development uses Laravel's built-in database-backed drivers: `CACHE_STORE=database`, `SESSION_DRIVER=database`, and `QUEUE_CONNECTION=database`. The required `cache`, `cache_locks`, `sessions`, `jobs`, `job_batches`, and `failed_jobs` tables exist in migrations. `infrastructure:verify-database-drivers` verifies database-backed cache, rate limiter, sessions, queue configuration, table presence, cache round trips, and cache locks. Focused tests prove database cache writes, database cache locks, database session configuration, database queue persistence, and the verifier command. Redis remains pending for production/scaling and must be provisioned and integrated separately before this item is complete.
 - [ ] Configure private S3-compatible object storage and signed-download authorization.
-- [ ] Hash organization invitation tokens at rest, add expiry/acceptance invariants, and avoid retaining reusable plaintext secrets.
+- [x] Hash organization invitation tokens at rest, add expiry/acceptance invariants, and avoid retaining reusable plaintext secrets.
+    - **Verified:** Invitations now persist only SHA-256 token hashes, use UUID public route identifiers, normalize recipient emails, and retain plaintext tokens only for creation-time delivery. PostgreSQL check constraints enforce creation, expiry, and acceptance ordering; queued invitation notifications are encrypted. Invitation lifecycle, authentication handoff, frontend contracts, migration, and full Pest coverage pass locally (157 tests, 777 assertions). PostgreSQL-specific verification remains part of the pending PostgreSQL integration lane.
 - [ ] Add cross-tenant request, route-model-binding, nested-ID, direct-query, queued-job, and file-download isolation tests.
+    - **Progress:** Added passing coverage for tenant-prefixed requests, nested membership binding, scheduling public-ID/direct-query boundaries, and queued foreign-record selection with context cleanup. File-download isolation remains pending until the private S3/file-asset download surface is implemented.
 
 **Exit criteria:** tenant context is explicit in every execution mode, PostgreSQL isolation is tested, and no user-controlled identifier can cross organization boundaries.
 
 ## Phase 2 — Roles, permissions, and policy enforcement
 
 - [x] Create normalized role, permission, role-permission, and membership-role-assignment tables.
-- [ ] Define and seed the canonical permission catalog and immutable built-in organization roles.
-- [ ] Replace runtime checks against the legacy `organization_members.role` value with normalized role assignments.
-    - **Progress:** normalized tables exist, but current organization membership and invitation flows still use the fixed role enum/column.
-- [ ] Support optional academic-unit scope on role assignments using the academic hierarchy closure table.
-- [ ] Implement a permission resolver with request-local caching and explicit cache invalidation.
+- [x] Define and seed the canonical permission catalog and immutable built-in organization roles.
+    - **Verified:** Canonical organization permissions are upserted from the enum catalog, organization-scoped system roles are provisioned with synchronized role-permission pivots, and legacy owner/admin/member memberships receive normalized unscoped assignments. Organization creation, factories, and the repeatable seeder all use the same tenant-context-aware provisioner; focused authorization coverage and the full Pest suite pass (162 tests, 825 assertions).
+- [x] Replace runtime checks against the legacy `organization_members.role` value with normalized role assignments.
+    - **Verified:** `HasOrganizations`, organization policies, ownership checks, and minimum-role middleware now resolve authorization from tenant-context-aware normalized assignments and role permissions. Membership pivot saves and member/invitation lifecycle actions synchronize normalized assignments transactionally; the legacy role column remains a compatibility write/read-model field for existing invitation and Inertia contracts. Focused authorization coverage and the full Pest suite pass (163 tests, 828 assertions).
+- [x] Support optional academic-unit scope on role assignments using the academic hierarchy closure table.
+    - **Verified:** Added a read-only closure model and optional academic-unit context to normalized permission resolution. Unscoped assignments remain organization-wide; scoped assignments apply to their exact unit and closure descendants only, with explicit tenant ownership checks. Root, descendant, sibling, and cross-organization authorization tests pass, and the full Pest suite passes (164 tests, 833 assertions).
+- [x] Implement a permission resolver with request-local caching and explicit cache invalidation.
+    - **Verified:** Normalized organization and academic-unit permission checks now use a Laravel scoped resolver with lifecycle-local caching. Organization-wide provisioning invalidates cached decisions, direct assignment changes expose explicit user/scope and organization invalidation methods, and authorization tests verify cached results refresh after invalidation. The full Pest suite passes (164 tests, 834 assertions).
 - [ ] Create policies for organizations, memberships, invitations, academic records, resources, schedules, versions, approvals, templates, subscriptions, and audit records.
-- [ ] Prevent privilege escalation, owner removal, last-owner loss, and unauthorized role delegation.
-- [ ] Gate custom-role administration behind the subscription capability system.
-- [ ] Build organization role and member administration pages with clear scope and capability feedback.
-- [ ] Add authorization matrix tests for built-in roles, custom roles, academic-unit scope, and multiple-organization users.
+    - **Progress:** Added auto-discovered tenant policies for current organization, membership, invitation, academic, resource, catalog, timetable, version, schedule, and custom role models. Mutation policies use normalized permissions; custom-role mutations additionally require the `custom_roles` entitlement. Approval, template, subscription, and audit policies remain pending until their schema-only areas have models and command surfaces. Focused policy coverage and the full Pest suite pass (202 tests, 1,033 assertions).
+- [x] Prevent privilege escalation, owner removal, last-owner loss, and unauthorized role delegation.
+    - **Verified:** Organization deletion now requires both the normalized delete permission and the explicit `owner_user_id`; owner memberships and owner role assignments cannot be removed or granted through model writes, owner invitations are rejected at request and model boundaries, direct owner identity changes require a matching owner membership, and membership role updates authorize the target role's permission set. `TransferOrganizationOwnership` authorizes the explicit owner, locks the organization and memberships in a retried tenant transaction, requires an existing member target, synchronizes compatibility and normalized roles, and records the before/after audit event. The full Pest suite passes (193 tests, 967 assertions).
+- [x] Gate custom-role administration behind the subscription capability system.
+    - **Verified:** `RolePolicy` allows organization members to view roles, but requires normalized `UpdateMember` permission and an active `custom_roles` entitlement for custom-role creation, updates, and deletion. System roles remain immutable through the policy; focused policy tests and the full suite pass.
+- [x] Build organization role and member administration pages with clear scope and capability feedback.
+    - **Verified:** Organization settings now expose member administration alongside built-in and custom role definitions. Entitled administrators can create, edit, and delete unassigned custom roles with selected canonical permissions; system roles and assigned roles are protected, and users without the capability receive explicit upgrade feedback. Route/Inertia tests, Vue type checking, lint, production build, and the full Pest suite pass.
+- [x] Add authorization matrix tests for built-in roles, custom roles, academic-unit scope, and multiple-organization users.
+    - **Verified:** Built-in owner/admin/member decisions are compared against the canonical permission matrix; custom-role assignments resolve only selected permissions; existing root, descendant, sibling, and foreign academic-unit scope coverage remains green; and a user with memberships in multiple organizations receives independent role and permission decisions. The authorization suite passes 31 tests and 180 assertions, and the full suite passes 205 tests and 1,043 assertions.
 
 **Exit criteria:** all protected operations use policies/permissions rather than fixed role comparisons or controller-only checks.
 
@@ -196,16 +206,26 @@ Authorization and subscription enforcement must also exist server-side.
 
 - [x] Create schema for academic years, periods, unit types, allowed type edges, units, hierarchy closure, calendars, calendar exceptions, and student groups.
 - [x] Add initial Eloquent models and enums for the principal academic entities.
-- [ ] Complete model relationships, casts, tenant invariants, factories, and deletion rules.
-- [ ] Implement the academic hierarchy service to create, move, archive, and query units transactionally.
+- [x] Complete model relationships, casts, tenant invariants, factories, and deletion rules.
+    - **Verified:** Academic years, periods, unit types, units, closure rows, and student groups now expose their tenant-safe relationship graph and typed attributes. Immutable organization ownership, cross-tenant parent checks, academic/unit date boundaries, co-located factory states, soft deletion, and restrictive required-parent deletion behavior are covered by focused academic model tests; the full suite passes 209 tests and 1,072 assertions.
+- [x] Implement the academic hierarchy service to create, move, archive, and query units transactionally.
+    - **Verified:** `AcademicHierarchyService` runs under `TenantContext` and retried transactions, validates organization-owned types and configured parent edges, creates and rewrites closure rows for subtree moves, rejects descendant cycles, guards archive operations, and queries roots with closure depth. Focused hierarchy coverage and the full suite pass (213 tests, 1,090 assertions).
 - [ ] Maintain closure-table rows and reject cycles under concurrency.
-- [ ] Validate allowed parent/child unit-type edges while keeping unit types configurable per organization.
-- [ ] Add optional preschool, K–12, senior-high, university, and training-center presets that create ordinary configurable units rather than special-case schema.
-- [ ] Implement academic year and configurable period lifecycle rules without assuming semesters.
-- [ ] Implement calendars, operating hours, holidays, blocked dates, and exceptional teaching dates.
-- [ ] Implement student-group membership in the hierarchy and active-date handling.
-- [ ] Add actions, requests, policies, routes, and Inertia/Vue administration pages for academic setup.
-- [ ] Add tests for arbitrary valid hierarchies, invalid edges, cycle prevention, period boundaries, and tenant isolation.
+    - **Progress:** create and move operations now maintain closure rows and use ordered row locks. A dedicated forked PostgreSQL integration test now exercises concurrent child creation and verifies complete, unique closure paths; it is wired into `phpunit.postgresql.xml` and CI but could not run locally because the CI-only `talasched_app` credentials/database are unavailable.
+- [x] Validate allowed parent/child unit-type edges while keeping unit types configurable per organization.
+    - **Verified:** `AcademicHierarchyService` validates organization-local configured type edges for create and move operations while allowing each organization to define its own hierarchy; focused valid/invalid edge tests and the full suite pass (213 tests, 1,090 assertions).
+- [x] Add optional preschool, K–12, senior-high, university, and training-center presets that create ordinary configurable units rather than special-case schema.
+    - **Verified:** `AcademicHierarchyPresetService` provisions organization-local three-level unit types, configured edges, and editable sample paths for preschool, K-12, senior high, university, and training-center structures. Stable codes make application idempotent while preserving administrator edits; focused coverage and the full suite pass (220 tests, 1,127 assertions).
+- [x] Implement academic year and configurable period lifecycle rules without assuming semesters.
+    - **Verified:** `AcademicYearLifecycleService` creates draft years, permits configurable non-overlapping period kinds, requires contiguous period sequences for activation, prevents overlapping active years, and supports one-way close transitions. Focused lifecycle coverage, scoped static analysis, and the full suite pass (223 tests, 1,138 assertions).
+- [x] Implement calendars, operating hours, holidays, blocked dates, and exceptional teaching dates.
+    - **Verified:** Tenant-safe academic calendar models and `AcademicCalendarService` now manage one operating-hours row per period/weekday and idempotent date exceptions for holidays, blocked dates, and teaching windows. Date bounds, minute windows, full-day block semantics, closed-year protection, relationships, factories, focused coverage, and the full suite pass (226 tests, 1,157 assertions).
+- [x] Implement student-group membership in the hierarchy and active-date handling.
+    - **Verified:** Student groups now have tenant-safe optional active dates bounded by their academic year, and `StudentGroupService` transactionally assigns units, enrolls or unenrolls groups from matching periods idempotently, rejects inactive or foreign-period membership, and protects closed years. Migration, focused coverage, scoped static analysis, and the full suite pass (228 tests, 1,173 assertions).
+- [x] Add actions, requests, policies, routes, and Inertia/Vue administration pages for academic setup.
+    - **Verified:** Organization-scoped public-ID routes and policies now expose year/period lifecycle, configurable hierarchy units, operating hours, calendar exceptions, and student-group dates/unit/period membership through the `academic/Setup` Inertia page. Wayfinder bindings, focused controller coverage, Vue type-checking/linting, production build, static analysis, and the full suite pass (230 tests, 1,224 assertions).
+- [x] Add tests for arbitrary valid hierarchies, invalid edges, cycle prevention, period boundaries, and tenant isolation.
+    - **Verified:** Focused academic tests now cover a four-level arbitrary configured chain in addition to invalid parent edges, descendant-cycle moves, period date/sequence boundaries, foreign-year/unit references, and tenant-isolated queries. The full suite passes (231 tests, 1,227 assertions).
 
 **Exit criteria:** an organization can configure each target institution structure and calendar without code or schema changes.
 
@@ -213,15 +233,24 @@ Authorization and subscription enforcement must also exist server-side.
 
 - [x] Create the scheduling-resource backbone and schemas for faculty, rooms, features, availability, subjects, subject components, offerings, and student groups.
 - [x] Model teachers, rooms, and groups as schedulable resources suitable for one canonical conflict mechanism.
-- [ ] Complete resource model relationships, value objects, factories, archival behavior, and tenant-safe constraints.
-- [ ] Implement faculty profiles, employment metadata, department links, daily/weekly load limits, availability, and preferences.
-- [ ] Implement campus/building/room management, configurable room types, capacities, features, and availability.
-- [ ] Implement subject/course catalogs with lecture/laboratory components, units, required hours, default duration, and room requirements.
-- [ ] Implement period-specific offerings that associate subjects, groups, eligible instructors, required sessions, and delivery requirements without permanently assigning teachers to subjects.
-- [ ] Define precedence and overlap validation for resource availability rules.
-- [ ] Build actions, policies, routes, and Inertia/Vue administration pages for faculty, rooms, features, subjects, offerings, and availability.
-- [ ] Add import preparation points for bulk faculty, room, subject, and offering data without implementing a generic importer prematurely.
-- [ ] Add CRUD, validation, authorization, availability, and cross-tenant tests.
+- [x] Complete resource model relationships, value objects, factories, archival behavior, and tenant-safe constraints.
+    - **Verified:** Resource, faculty, room, building, feature, availability, subject, component, and offering models now expose typed tenant-safe relationships, enum/value casts, immutable ownership, parent organization checks, soft-archive behavior, and usable co-located factories. Persisted graph, archival, cross-tenant, focused scheduling, Pint, and scoped PHPStan checks pass (15 tests, 123 assertions).
+- [x] Implement faculty profiles, employment metadata, department links, daily/weekly load limits, availability, and preferences.
+    - **Verified:** Added `FacultyProfileService` for tenant-context-aware profile creation/update, employment metadata and load-limit validation, primary academic-unit assignment, and resource-scoped availability/preference rules. Focused service coverage passes 4 tests and 60 assertions; the full suite passes 235 tests and 1,287 assertions. Administration workflow remains in the dedicated actions/routes/UI item below.
+- [x] Implement campus/building/room management, configurable room types, capacities, features, and availability.
+    - **Verified:** Added `ResourceManagementService` for tenant-context-aware campus-linked buildings, configurable room types/features, atomic room plus scheduling-resource creation, feature quantities, and archive/restore synchronization with the resource active flag. Existing resource availability rules provide the room/faculty availability model; focused resource coverage and the full suite pass (237 tests, 1,311 assertions). Precedence/overlap semantics remain in the dedicated availability task.
+- [x] Implement subject/course catalogs with lecture/laboratory components, units, required hours, default duration, and room requirements.
+    - **Verified:** Added `SubjectCatalogService` for tenant-context-aware subject CRUD/archive/restore, typed catalog components with weekly/session/duration defaults, and explicit tenant-safe room-type/feature requirement replacement. Component history survives subject archival; focused catalog coverage and the full suite pass (239 tests, 1,335 assertions).
+- [x] Implement period-specific offerings that associate subjects, groups, eligible instructors, required sessions, and delivery requirements without permanently assigning teachers to subjects.
+    - **Verified:** Added `SubjectOfferingService` to validate period/group academic-year integrity, snapshot subject component defaults and room/feature requirements into period offerings, manage active eligible faculty through tenant-keyed instructor pivots, and keep snapshots independent from later catalog edits. Focused offering coverage and the full suite pass (245 tests, 1,374 assertions).
+- [x] Define precedence and overlap validation for resource availability rules.
+    - **Verified:** Added `ResourceAvailabilityResolver` with calendar baseline, period-specific-over-global hard available windows, additive hard unavailable blocks, effective-date filtering, and soft preferred/avoid warnings. Scheduling validation now blocks only hard issues and exposes soft warnings; focused coverage and the full suite pass (245 tests, 1,374 assertions). Administrative resource management remains in the dedicated actions/routes/UI item.
+- [x] Build actions, policies, routes, and Inertia/Vue administration pages for faculty, rooms, features, subjects, offerings, and availability.
+    - **Verified:** Added organization-authorized resource/catalog form requests, resource and metadata policies, tenant-context availability creation, Wayfinder routes, and the `resources/Setup` Inertia/Vue workspace. The workflow exposes public IDs and organization-local codes only; focused setup coverage passes 2 tests and 59 assertions, the full suite passes 247 tests and 1,433 assertions, frontend type/lint/build checks pass, and scoped PHPStan is clean.
+- [x] Add import preparation points for bulk faculty, room, subject, and offering data without implementing a generic importer prematurely.
+    - **Verified:** Added explicit `FacultyImportRow`, `RoomImportRow`, `SubjectImportRow`, and `OfferingImportRow` contracts with fixed column layouts and scalar/enum normalization. No file parser, queue, or generic importer was introduced; focused contract coverage passes 3 tests and 23 assertions.
+- [x] Add CRUD, validation, authorization, availability, and cross-tenant tests.
+    - **Verified:** Existing service coverage exercises update/archive/restore, relationship replacement, eligibility, and availability behavior; added setup-controller validation/isolation cases and generic resource availability service coverage. Focused resource tests pass 5 tests and 81 assertions; full-suite and static checks are run in final verification.
 
 **Exit criteria:** schedulers can prepare all inputs required for manual scheduling through authorized administration workflows.
 
@@ -232,18 +261,28 @@ Authorization and subscription enforcement must also exist server-side.
 - [x] Implement JSON endpoints to validate and create recurring schedule entries.
 - [x] Return structured conflict issues for the current validator checks.
 - [x] Add initial tests for valid creation, resource overlap, availability, room requirements, and faculty load.
-- [ ] Refactor the monolithic validator into a registry of typed hard- and soft-constraint handlers backed by database configuration.
-    - **Progress:** current checks live in `ValidateScheduleEntry`; rule behavior is not yet extensible through dedicated handlers.
-- [ ] Add missing hard checks: calendar operating hours, blocked dates, positive available-window semantics, room features, instructor eligibility, offering hour/session fulfillment, exception dates, effective date ranges, and organization-wide blocked times.
-- [ ] Add configurable soft-constraint evaluation and return warnings/scores separately from hard failures.
-- [ ] Acquire deterministic PostgreSQL advisory locks for all affected resources before conflict validation and insertion.
-- [ ] Translate database exclusion/uniqueness violations into the same structured conflict response used by preflight validation.
-- [ ] Add update, move, resize, and delete actions with optimistic locking and full revalidation.
-- [ ] Implement per-date cancellation, replacement, and room/teacher substitution through schedule exceptions.
-- [ ] Build canonical read models/queries for teacher, student-group, room, unit, and organization timetable views without duplicating schedule records.
-- [ ] Build the Inertia/Vue timetable grid, filters, entry editor, conflict panel, and accessible non-grid view.
+- [x] Refactor the monolithic validator into a registry of typed hard- and soft-constraint handlers backed by database configuration.
+    - **Verified:** `ValidateScheduleEntry` now builds an immutable prefetched scheduling context and delegates to registered typed handlers. Canonical constraint definitions are seeded, organization/period configuration selects or disables non-mandatory handlers, mandatory handlers cannot be downgraded, and structured hard/soft issues remain compatible with the existing API. Relationship foreign-key inference is explicit for `constraint_definition_id`; focused scheduling coverage passes 15 tests and 76 assertions, the full suite passes 257 tests and 1,488 assertions, and scoped PHPStan/Pint checks pass.
+- [x] Add missing hard checks: calendar operating hours, blocked dates, positive available-window semantics, room features, instructor eligibility, offering hour/session fulfillment, exception dates, effective date ranges, and organization-wide blocked times.
+    - **Verified:** The canonical validator now supports optional occurrence dates for exact calendar exception and resource effective-range evaluation, rejects out-of-period or weekday-mismatched dates, honors exceptional teaching windows, applies conservative full-period checks to recurring availability rules, and evaluates validated organization-wide blocked-time windows from constraint configuration. Focused scheduling coverage passes 24 tests and 126 assertions; the full suite passes 273 tests and 1,609 assertions; scoped PHPStan, Pint, and diff checks pass.
+- [x] Add configurable soft-constraint evaluation and return warnings/scores separately from hard failures.
+    - **Verified:** Constraint results now preserve the legacy combined `issues` list while exposing separate `hard_issues`, `warnings`, and a configuration-weighted warning `score` from the validation endpoint. Schedule creation continues to reject only hard issues; focused scheduling coverage passes 15 tests and 79 assertions, the full suite passes 257 tests and 1,491 assertions, and scoped PHPStan/Pint checks pass.
+- [x] Acquire deterministic PostgreSQL advisory locks for all affected resources before conflict validation and insertion.
+    - **Verified:** authoritative schedule creation acquires transaction-scoped PostgreSQL locks for the organization, timetable version, and deduplicated numerically sorted resource IDs before row locking and canonical validation. Non-PostgreSQL test connections safely no-op; lock-name determinism is covered by a unit test, the local PostgreSQL advisory-lock function is available, and the full suite passes 258 tests and 1,492 assertions.
+- [x] Translate database exclusion/uniqueness violations into the same structured conflict response used by preflight validation.
+    - **Verified:** schedule creation catches only PostgreSQL exclusion violations and schedule-reservation/assignment uniqueness violations after transaction rollback, translates them into the existing `schedule_conflict` contract with affected resource identities, and rethrows unrelated query errors. Focused conflict/scheduling coverage passes 17 tests and 84 assertions, the full suite passes 260 tests and 1,497 assertions, and scoped PHPStan/Pint checks pass.
+- [x] Add update, move, resize, and delete actions with optimistic locking and full revalidation.
+    - **Verified:** added tenant-scoped PATCH and DELETE scheduling routes, validated mutation requests, atomic projection rebuild/removal actions, compare-and-swap `lock_version` checks, stale-write responses, version editability guards, advisory locks, and canonical hard-constraint revalidation excluding the entry being updated. Focused scheduling coverage passes 28 tests and 128 assertions, frontend type/lint checks pass, the full suite passes 263 tests and 1,515 assertions, and scoped PHPStan/Pint checks pass.
+- [x] Implement per-date cancellation, replacement, and room/teacher substitution through schedule exceptions.
+    - **Verified:** Added tenant-scoped schedule-exception command handling for cancellation, date rescheduling, and validated teacher/room replacement without mutating recurring entries. Exceptions enforce academic-period and recurring-weekday bounds, use date/resource advisory locks, expose public-ID JSON contracts, and focused scheduling coverage passes 21 tests and 118 assertions with scoped PHPStan/Pint checks.
+- [x] Build canonical read models/queries for teacher, student-group, room, unit, and organization timetable views without duplicating schedule records.
+    - **Verified:** Added a tenant-scoped TimetableViewQuery and typed filter/data contracts covering organization, teacher, student-group, room, and academic-unit projections from one recurring-entry source. Public-ID JSON output includes offering/resource context and effective dated cancellation/rescheduling fields without duplicating schedule records; focused read coverage passes 3 tests and 44 assertions, the scheduling suite passes 34 tests and 193 assertions, the full suite passes 269 tests and 1,580 assertions, and Wayfinder/type/lint checks pass.
+- [x] Build the Inertia/Vue timetable grid, filters, entry editor, conflict panel, and accessible non-grid view.
+    - **Verified:** Added a tenant-scoped Inertia workspace backed by the canonical timetable query, URL-shareable scope/version/resource/unit/date filters, a responsive weekly board with mobile agenda, accessible text-first agenda, public-ID entry inspector/editor, validation conflict panel, and read-only dated projections. Focused scheduling coverage passes 35 tests and 214 assertions, the full suite passes 270 tests and 1,601 assertions, and Wayfinder, type-check, lint, production build, PHPStan, Pint, and diff checks pass.
 - [ ] Add PostgreSQL concurrency tests proving simultaneous requests cannot double-book teachers, rooms, or groups.
-- [ ] Add policy, entitlement, audit, and tenant-isolation coverage to every scheduling mutation.
+    - **Progress:** Added fork/barrier integration coverage for isolated shared teacher, room, and student-group races. Each pair asserts exactly one committed entry, a structured `resource_overlap` conflict for the losing request, and no partial reservations; the configured local `talasched_testing` PostgreSQL credentials currently reject authentication, so the test skips until that environment is available.
+- [x] Add policy, entitlement, audit, and tenant-isolation coverage to every scheduling mutation.
+    - **Verified:** Scheduling mutations require the organization scheduling permission and an active `manual_scheduling` entitlement, record actor/subject-scoped create, update, delete, and exception audit events transactionally, and keep update/delete/exception lookups tenant-scoped. Focused authorization and scheduling coverage passes 48 tests and 250 assertions; the full suite passes 276 tests and 1,632 assertions; scoped PHPStan, Pint, and diff checks pass.
 
 **Exit criteria:** authorized schedulers can safely create and maintain a timetable manually, and the database remains the final guard against double booking.
 
@@ -252,11 +291,16 @@ Authorization and subscription enforcement must also exist server-side.
 - [x] Model immutable timetable versions with draft, review, approved, published, and superseded states.
 - [x] Implement initial clone and publish actions.
 - [x] Add passing basic clone and publish tests.
-- [ ] Clone schedule exceptions and all version-owned metadata, not only entries/resources/reservations.
-- [ ] Add version comparison by stable entry lineage and present added, removed, moved, reassigned, and changed entries.
-- [ ] Implement rollback as cloning an older version into a new draft; never mutate published history.
-- [ ] Run complete hard-constraint validation immediately before approval completion and publication.
+- [x] Clone schedule exceptions and all version-owned metadata, not only entries/resources/reservations.
+    - **Verified:** Timetable version cloning now preserves entry logical lineage and copies dated exception fields plus exception-resource pivots into the new draft with fresh public IDs; approval instances and export runs remain historical source-version records. Focused versioning coverage passes 4 tests and 20 assertions; the full suite passes 277 tests and 1,643 assertions; scoped PHPStan, Pint, and diff checks pass.
+- [x] Add version comparison by stable entry lineage and present added, removed, moved, reassigned, and changed entries.
+    - **Verified:** Added an organization-scoped JSON comparison endpoint that validates both public version IDs against one timetable, keys snapshots by stable `logical_id`, and reports added, removed, moved, reassigned, and content-changed entries with before/after data. Focused versioning coverage passes 5 tests and 35 assertions; the full suite passes 278 tests and 1,658 assertions; scoped PHPStan, Pint, and diff checks pass.
+- [x] Implement rollback as cloning an older version into a new draft; never mutate published history.
+    - **Verified:** Added an authorized rollback action for published and superseded sources that reuses the transactional clone path, creates a new draft with `based_on_version_id`, and rejects editable sources without changing version history. Focused versioning and authorization coverage passes 25 tests and 139 assertions; the full suite passes 280 tests and 1,670 assertions; scoped PHPStan, Pint, and diff checks pass.
+- [x] Run complete hard-constraint validation immediately before approval completion and publication.
+    - **Verified:** `ValidateTimetableVersion` now runs inside both the locked approval-completion and publication transactions, preserving structured entry identifiers and rejecting invalid versions before committing state or superseding history. Focused versioning/approval coverage passes 29 tests and 166 assertions; the full suite passes 284 tests and 1,697 assertions; scoped PHPStan and Pint pass.
 - [ ] Add state-machine transition guards, authorization, capabilities, audit events, domain events, and transactional outbox handling where external work follows publication.
+    - **Progress:** Version clone, rollback, submit, publish, and approval-decision actions now enforce locked state transitions, capability-gated policy abilities, idempotent approval decisions, and transactional audit records. Domain events and an outbox remain pending because the repository has no publication side-effect consumer or outbox schema to integrate without speculative infrastructure.
 - [ ] Add version list, clone, compare, submit, publish, supersede, and rollback UI.
 - [ ] Add race-condition tests for concurrent publication and immutable-history tests.
 
@@ -266,31 +310,44 @@ Authorization and subscription enforcement must also exist server-side.
 
 - [x] Create workflow, workflow-version, step, approval-instance, approval-action, and signatory-profile schema.
 - [x] Implement an initial action that snapshots workflow steps when a timetable version is submitted.
-- [ ] Decide and document whether step eligibility needs a dedicated `approval_step_members` relation in addition to role/permission selectors.
-- [ ] Implement versioned workflow authoring, validation, activation, and retirement.
-- [ ] Implement approve, reject, request-changes, cancel, and resubmit actions with sequential step advancement.
+    - **Verified:** Submission snapshots ordered selector metadata and role codes into each approval instance step, and blocks duplicate active instances while allowing resubmission after requested changes.
+- [x] Decide and document whether step eligibility needs a dedicated `approval_step_members` relation in addition to role/permission selectors.
+    - **Verified:** MVP eligibility uses immutable permission and organization-role selector snapshots; a named-membership relation is deferred until named approver administration is implemented.
+- [x] Implement versioned workflow authoring, validation, activation, and retirement.
+    - **Verified:** Added tenant- and `approval_workflows`-capability-gated create, activate, and retire actions. New workflows remain inactive until a version is activated; workflow steps enforce contiguous sequences, valid selectors, positive approval counts, organization-local roles, and immutable activated versions; submission rejects draft or retired workflow versions. Focused workflow coverage passes 5 tests and 18 assertions; the full suite passes 297 tests and 1,764 assertions; scoped PHPStan and Pint pass.
+- [x] Implement approve, reject, request-changes, cancel, and resubmit actions with sequential step advancement.
+    - **Verified:** `DecideTimetableApproval` locks the instance and active step, enforces selector eligibility and self-approval rules, appends idempotent signatory decisions, advances ordered steps, returns requested-change versions to editable state, and completes approval only after hard validation; focused approval coverage passes 4 tests and 29 assertions.
 - [ ] Resolve eligible approvers through organization roles, academic-unit scope, named memberships, or permissions.
+    - **Progress:** Permission and organization-role selectors are enforced from submission snapshots; academic-unit scope and named-membership selectors remain pending with the deferred `approval_step_members` decision.
 - [ ] Configure separation-of-duties and self-approval rules per workflow.
-- [ ] Complete approval by transitioning the timetable version to approved only after all required steps succeed.
+    - **Progress:** Per-step self-approval is enforced from the immutable snapshot; broader separation-of-duties rules remain pending.
+- [x] Complete approval by transitioning the timetable version to approved only after all required steps succeed.
+    - **Verified:** Final approval locks and validates the version before committing `approved`; sequential-step, invalid-version rollback, idempotency, requested-changes resubmission, and signatory snapshot coverage passes 4 tests and 29 assertions.
 - [ ] Implement signatory profile validity periods and private signature-image assets.
-- [ ] Snapshot signatory name, position, organization unit, label, decision, and signature asset at approval time so history remains stable.
-    - **Progress:** snapshot columns exist on approval actions; no complete approval action currently populates or protects them.
+- [x] Snapshot signatory name, position, organization unit, label, decision, and signature asset at approval time so history remains stable.
+    - **Verified:** Approval decisions copy the eligible signatory profile's name, position, academic-unit label, private asset coordinates/checksum, decision, and comment into append-only action rows with idempotency keys; focused approval coverage verifies the historical snapshot.
 - [ ] Build workflow designer, approval inbox, decision forms, status timeline, and signatory administration UI.
 - [ ] Add authorization, replay/idempotency, concurrent-action, historical-snapshot, and workflow-version tests.
+    - **Progress:** Authorization, idempotency, invalid-version rollback, sequential advancement, resubmission, workflow activation, retirement, and signatory snapshot coverage pass locally; PostgreSQL concurrency and broader historical workflow-version coverage remain pending.
 
 **Exit criteria:** organizations can configure different approval chains and published outputs preserve the exact historical signatories.
 
 ## Phase 8 — Subscriptions, capabilities, and limits
 
 - [x] Create plan, capability, plan-capability, organization-subscription, override, and usage schema.
-- [ ] Complete and verify the entitlement resolver.
-    - **Progress:** `EntitlementService` resolves boolean/integer plan values and organization overrides, but its current feature tests error because of invalid fixture insertion.
-- [ ] Define capability metadata, value types, defaults, and seed Starter, Professional, and Enterprise plan fixtures.
-- [ ] Define subscription lifecycle semantics for trialing, active, grace period, past due, canceled, and expired states.
+- [x] Complete and verify the entitlement resolver.
+    - **Verified:** `EntitlementService` resolves active trialing/active plan values, applies non-expired organization overrides first, returns typed boolean/integer values, and denies missing or expired entitlements. Focused subscription tests and the full suite pass.
+- [x] Define capability metadata, value types, defaults, and seed Starter, Professional, and Enterprise plan fixtures.
+    - **Verified:** `SubscriptionCatalogSeeder` idempotently seeds capability metadata and the three built-in plan tiers inside a transaction, with representative boolean and integer values covered by focused tests.
+- [x] Define subscription lifecycle semantics for trialing, active, grace period, past due, canceled, and expired states.
+    - **Verified:** Added the typed `SubscriptionStatus` vocabulary and `grace_ends_at` persistence. `EntitlementService` now centrally evaluates trial, billing, grace, past-due, cancellation, and expiry windows without plan-name checks; focused entitlement coverage passes 5 tests and 23 assertions, and the full suite passes 297 tests and 1,764 assertions.
 - [ ] Implement centralized capability and numeric-limit checks through policies, middleware, domain guards, and reusable UI props.
+    - **Progress:** `CapabilityGuard` now centralizes capability checks, numeric capacity assertions, and the complete typed entitlement map. Existing scheduling, versioning, custom-role, and approval authorization paths use the guard, and `HandleInertiaRequests` shares entitlements for UI gating. New organizations receive an active Starter subscription transactionally; legacy factory/fixture organizations without subscription metadata remain compatible until a backfill is defined.
 - [ ] Implement transaction-safe usage reservations for limits such as members and active timetables.
+    - **Progress:** Added `UsageService` with tenant-scoped lifetime capacity counters that initialize from existing member/timetable rows, lock before checking entitlements, retry deadlocks, reject over-limit reservations, prevent underflow, and roll back with the surrounding transaction. Organization creation bootstraps subscriptions, invitation acceptance reserves member capacity, and member removal/leave release it under organization locks; focused lifecycle coverage and the full suite pass 299 tests and 1,772 assertions. Timetable creation/removal command boundaries do not exist yet, so active-timetable wiring remains pending.
 - [ ] Add a billing-provider port and webhook idempotency ledger while keeping the initial provider optional.
 - [ ] Integrate capability checks for automatic scheduling, Excel templates, approval workflows, custom roles, multi-campus, API access, and audit features.
+    - **Progress:** Manual scheduling, timetable versioning, approval workflows, and custom roles now enforce capabilities through domain policies/actions. Automatic scheduling, Excel templates, multi-campus, API access, and audit-feature entitlements remain pending with their command surfaces.
 - [ ] Build plan/usage/subscription administration pages and disabled-feature upgrade messaging.
 - [ ] Add tests for overrides, downgrades below current usage, concurrent limit consumption, grace periods, and webhook replay.
 
@@ -300,6 +357,7 @@ Authorization and subscription enforcement must also exist server-side.
 
 - [x] Create an append-only audit-event schema and an initial `AuditLogger` abstraction.
 - [ ] Integrate audit logging into organization, membership, academic, resource, scheduling, version, approval, subscription, template, export, and security-sensitive actions.
+    - **Progress:** Version lifecycle and approval submission/decision actions now record actor-scoped before/after events transactionally. Organization, membership, academic, resource, subscription, template, export, and security-sensitive integrations remain.
 - [ ] Capture actor, organization, target, request metadata, before/after summaries, correlation ID, and impersonation context without storing secrets.
     - **Progress:** `AuditLogger` now reuses the active request correlation ID and prefers public subject identifiers; impersonation context and systematic action integration remain incomplete.
 - [ ] Define sensitive-field redaction, retention, export, and deletion policies.

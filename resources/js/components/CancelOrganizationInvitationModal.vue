@@ -33,7 +33,7 @@ const cancelInvitation = () => {
     }
 
     router.visit(
-        destroyInvitation([props.organization.slug, props.invitation.code]),
+        destroyInvitation([props.organization.slug, props.invitation.id]),
         {
             onStart: () => (processing.value = true),
             onFinish: () => (processing.value = false),

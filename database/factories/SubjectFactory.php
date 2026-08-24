@@ -27,4 +27,9 @@ class SubjectFactory extends Factory
             'is_active' => true,
         ];
     }
+
+    public function forOrganization(Organization $organization): static
+    {
+        return $this->state(['organization_id' => $organization->getKey()]);
+    }
 }

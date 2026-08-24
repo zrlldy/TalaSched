@@ -1,0 +1,150 @@
+<?php
+
+use App\Enums\AcademicHierarchyPreset;
+use App\Enums\AcademicPeriodKind;
+use App\Enums\AcademicYearStatus;
+use App\Enums\CalendarExceptionKind;
+use App\Enums\OrganizationRole;
+use App\Models\AcademicCalendar;
+use App\Models\AcademicPeriod;
+use App\Models\AcademicUnit;
+use App\Models\AcademicYear;
+use App\Models\CalendarException;
+use App\Models\StudentGroup;
+use App\Models\User;
+use Illuminate\Support\Facades\DB;
+use Inertia\Testing\AssertableInertia as Assert;
+
+test('academic setup exposes public-id contracts and manages years, periods, and presets', function (): void {
+    $owner = User::factory()->withOwnedOrganization()->create();
+    $organization = $owner->currentOrganization;
+
+    $this->actingAs($owner)
+        ->get(route('academic.setup', $organization))
+        ->assertStatus(200)
+        ->assertInertia(fn (Assert $page): Assert => $page
+            ->component('academic/Setup')
+            ->where('years', [])
+            ->has('presets', count(AcademicHierarchyPreset::cases()))
+            ->has('periodKinds', count(AcademicPeriodKind::cases()))
+            ->where('canManageAcademic', true));
+
+    $this->actingAs($owner)
+        ->post(route('academic.years.store', $organization), [
+            'name' => '2026-2027',
+            'starts_on' => '2026-08-01',
+            'ends_on' => '2027-07-31',
+        ])
+        ->assertRedirect(route('academic.setup', $organization));
+
+    $year = AcademicYear::query()->where('organization_id', $organization->getKey())->firstOrFail();
+
+    expect($year->status)->toBe(AcademicYearStatus::Draft)
+        ->and($year->public_id)->not->toBe((string) $year->getKey());
+
+    $this->actingAs($owner)
+        ->post(route('academic.periods.store', [$organization, $year->public_id]), [
+            'name' => 'Term 1',
+            'kind' => AcademicPeriodKind::Term->value,
+            'sequence' => 1,
+            'starts_on' => '2026-08-01',
+            'ends_on' => '2027-07-31',
+        ])
+        ->assertRedirect(route('academic.setup', $organization));
+
+    $period = AcademicPeriod::query()->where('academic_year_id', $year->getKey())->firstOrFail();
+
+    $this->actingAs($owner)
+        ->post(route('academic.calendars.store', [$organization, $period->public_id]), [
+            'weekday' => 1,
+            'starts_at_minute' => 480,
+            'ends_at_minute' => 960,
+        ])
+        ->assertRedirect(route('academic.setup', $organization));
+
+    $this->actingAs($owner)
+        ->post(route('academic.exceptions.store', [$organization, $period->public_id]), [
+            'date' => '2026-12-25',
+            'kind' => CalendarExceptionKind::Holiday->value,
+            'name' => 'Christmas holiday',
+        ])
+        ->assertRedirect(route('academic.setup', $organization));
+
+    expect(AcademicCalendar::query()->where('academic_period_id', $period->getKey())->count())->toBe(1)
+        ->and(CalendarException::query()->where('academic_period_id', $period->getKey())->count())->toBe(1);
+
+    $this->actingAs($owner)
+        ->post(route('academic.years.activate', [$organization, $year->public_id]))
+        ->assertRedirect(route('academic.setup', $organization));
+
+    expect($year->fresh()->status)->toBe(AcademicYearStatus::Active)
+        ->and(AcademicPeriod::query()->where('academic_year_id', $year->getKey())->count())->toBe(1);
+
+    $this->actingAs($owner)
+        ->post(route('academic.presets.apply', $organization), [
+            'preset' => AcademicHierarchyPreset::University->value,
+        ])
+        ->assertRedirect(route('academic.setup', $organization));
+
+    expect(DB::table('academic_unit_types')->where('organization_id', $organization->getKey())->count())->toBe(3);
+
+    $college = AcademicUnit::query()->where('code', 'UNIVERSITY-COLLEGE-ARTS')->firstOrFail();
+
+    $this->actingAs($owner)
+        ->post(route('academic.units.store', $organization), [
+            'type_code' => 'university_program',
+            'name' => 'Bachelor of Science',
+            'code' => 'UNIVERSITY-PROGRAM-BS',
+            'parent_id' => $college->public_id,
+        ])
+        ->assertRedirect(route('academic.setup', $organization));
+
+    $unit = AcademicUnit::query()->where('code', 'UNIVERSITY-PROGRAM-BS')->firstOrFail();
+
+    expect($unit->public_id)->not->toBe((string) $unit->getKey());
+
+    $this->actingAs($owner)
+        ->post(route('academic.units.archive', [$organization, $unit->public_id]))
+        ->assertRedirect(route('academic.setup', $organization));
+
+    expect(AcademicUnit::withTrashed()->findOrFail($unit->getKey())->trashed())->toBeTrue();
+
+    $campus = AcademicUnit::query()->where('code', 'UNIVERSITY-CAMPUS')->firstOrFail();
+    $group = StudentGroup::factory()->forAcademicYear($year)->forAcademicUnit($college)->create();
+
+    $this->actingAs($owner)
+        ->post(route('academic.groups.dates', [$organization, $group->public_id]), [
+            'active_from' => '2026-08-01',
+            'active_until' => '2027-07-31',
+        ])
+        ->assertRedirect(route('academic.setup', $organization));
+
+    $this->actingAs($owner)
+        ->post(route('academic.groups.unit', [$organization, $group->public_id]), [
+            'academic_unit_id' => $campus->public_id,
+        ])
+        ->assertRedirect(route('academic.setup', $organization));
+
+    $this->actingAs($owner)
+        ->post(route('academic.groups.periods.toggle', [$organization, $group->public_id, $period->public_id]))
+        ->assertRedirect(route('academic.setup', $organization));
+
+    expect($group->fresh()->active_from->toDateString())->toBe('2026-08-01')
+        ->and($group->fresh()->academic_unit_id)->toBe($campus->getKey())
+        ->and(DB::table('student_group_periods')->where('student_group_id', $group->getKey())->count())->toBe(1);
+});
+
+test('academic setup mutations require the academic management permission', function (): void {
+    $owner = User::factory()->withOwnedOrganization()->create();
+    $member = User::factory()->create();
+    $organization = $owner->currentOrganization;
+    $organization->members()->attach($member, ['role' => OrganizationRole::Member]);
+
+    $this->actingAs($member)
+        ->post(route('academic.years.store', $organization), [
+            'name' => 'Unauthorized year',
+            'starts_on' => '2026-08-01',
+            'ends_on' => '2027-07-31',
+        ])
+        ->assertForbidden();
+});

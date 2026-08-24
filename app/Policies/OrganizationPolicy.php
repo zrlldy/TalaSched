@@ -94,6 +94,16 @@ class OrganizationPolicy
      */
     public function delete(User $user, Organization $organization): bool
     {
-        return $user->hasOrganizationPermission($organization, OrganizationPermission::DeleteOrganization);
+        return $user->ownsOrganization($organization)
+            && $user->hasOrganizationPermission($organization, OrganizationPermission::DeleteOrganization);
+    }
+
+    /**
+     * Determine whether the user can transfer organization ownership.
+     */
+    public function transferOwnership(User $user, Organization $organization): bool
+    {
+        return $user->ownsOrganization($organization)
+            && $user->hasOrganizationPermission($organization, OrganizationPermission::UpdateMember);
     }
 }

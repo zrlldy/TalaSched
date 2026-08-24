@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Enums\SubjectOfferingStatus;
 use App\Models\AcademicPeriod;
 use App\Models\StudentGroup;
 use App\Models\Subject;
@@ -22,22 +23,50 @@ class SubjectOfferingFactory extends Factory
     {
         return [
             'academic_period_id' => AcademicPeriod::factory(),
-            'organization_id' => fn (array $attributes): int => AcademicPeriod::findOrFail($attributes['academic_period_id'])->organization_id,
+            'organization_id' => fn (array $attributes): int => AcademicPeriod::query()
+                ->findOrFail((int) $attributes['academic_period_id'])
+                ->organization_id,
             'subject_id' => fn (array $attributes): int => Subject::factory()->create([
                 'organization_id' => $attributes['organization_id'],
             ])->id,
             'student_group_id' => function (array $attributes): int {
-                $period = AcademicPeriod::findOrFail($attributes['academic_period_id']);
+                $period = AcademicPeriod::query()->findOrFail((int) $attributes['academic_period_id']);
 
                 return StudentGroup::factory()->create([
                     'organization_id' => $attributes['organization_id'],
                     'academic_year_id' => $period->academic_year_id,
                 ])->id;
             },
-            'owning_academic_unit_id' => fn (array $attributes): int => StudentGroup::findOrFail($attributes['student_group_id'])->academic_unit_id,
+            'owning_academic_unit_id' => fn (array $attributes): int => StudentGroup::query()
+                ->findOrFail((int) $attributes['student_group_id'])
+                ->academic_unit_id,
             'code' => fake()->unique()->bothify('OFFERING-####'),
             'expected_enrollment' => fake()->numberBetween(10, 60),
-            'status' => 'active',
+            'status' => SubjectOfferingStatus::Active,
         ];
+    }
+
+    public function forAcademicPeriod(AcademicPeriod $academicPeriod): static
+    {
+        return $this->state([
+            'academic_period_id' => $academicPeriod->getKey(),
+            'organization_id' => $academicPeriod->organization_id,
+        ]);
+    }
+
+    public function forSubject(Subject $subject): static
+    {
+        return $this->state([
+            'subject_id' => $subject->getKey(),
+            'organization_id' => $subject->organization_id,
+        ]);
+    }
+
+    public function forStudentGroup(StudentGroup $studentGroup): static
+    {
+        return $this->state([
+            'student_group_id' => $studentGroup->getKey(),
+            'organization_id' => $studentGroup->organization_id,
+        ]);
     }
 }

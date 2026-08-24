@@ -47,4 +47,9 @@ class SchedulingResourceFactory extends Factory
             'type' => ResourceType::StudentGroup,
         ]);
     }
+
+    public function forOrganization(Organization $organization): static
+    {
+        return $this->state(['organization_id' => $organization->getKey()]);
+    }
 }

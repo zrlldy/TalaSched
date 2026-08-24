@@ -1,6 +1,7 @@
 <?php
 
 use App\Jobs\Middleware\UseTenantContext;
+use App\Models\AcademicYear;
 use App\Models\Organization;
 use App\Tenancy\TenantContext;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -55,11 +56,28 @@ test('tenant iteration establishes and clears context for every organization', f
 
 test('queued tenant middleware resolves public identity and clears context', function () {
     $organization = Organization::factory()->create();
+    $academicYear = AcademicYear::factory()->create(['organization_id' => $organization->id]);
     TenantContextProbeJob::$observedOrganizationPublicId = null;
+    TenantContextProbeJob::$observedAcademicYearExists = null;
 
-    Bus::dispatchSync(new TenantContextProbeJob($organization->public_id));
+    Bus::dispatchSync(new TenantContextProbeJob($organization->public_id, $academicYear->public_id));
 
     expect(TenantContextProbeJob::$observedOrganizationPublicId)->toBe($organization->public_id)
+        ->and(TenantContextProbeJob::$observedAcademicYearExists)->toBeTrue()
+        ->and(app(TenantContext::class)->organization())->toBeNull();
+});
+
+test('queued tenant middleware does not select a foreign tenant record', function () {
+    $organization = Organization::factory()->create();
+    $foreignOrganization = Organization::factory()->create();
+    $foreignAcademicYear = AcademicYear::factory()->create(['organization_id' => $foreignOrganization->id]);
+    TenantContextProbeJob::$observedOrganizationPublicId = null;
+    TenantContextProbeJob::$observedAcademicYearExists = null;
+
+    Bus::dispatchSync(new TenantContextProbeJob($organization->public_id, $foreignAcademicYear->public_id));
+
+    expect(TenantContextProbeJob::$observedOrganizationPublicId)->toBe($organization->public_id)
+        ->and(TenantContextProbeJob::$observedAcademicYearExists)->toBeFalse()
         ->and(app(TenantContext::class)->organization())->toBeNull();
 });
 
@@ -69,7 +87,9 @@ final class TenantContextProbeJob implements ShouldQueue
 
     public static ?string $observedOrganizationPublicId = null;
 
-    public function __construct(public string $organizationPublicId) {}
+    public static ?bool $observedAcademicYearExists = null;
+
+    public function __construct(public string $organizationPublicId, public string $academicYearPublicId) {}
 
     /**
      * Get the middleware the job should pass through.
@@ -83,6 +103,13 @@ final class TenantContextProbeJob implements ShouldQueue
 
     public function handle(TenantContext $tenantContext): void
     {
-        self::$observedOrganizationPublicId = $tenantContext->organization()?->public_id;
+        $organization = $tenantContext->organization();
+
+        self::$observedOrganizationPublicId = $organization?->public_id;
+        self::$observedAcademicYearExists = $organization !== null
+            && AcademicYear::query()
+                ->whereBelongsTo($organization)
+                ->where('public_id', $this->academicYearPublicId)
+                ->exists();
     }
 }

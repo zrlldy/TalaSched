@@ -5,11 +5,12 @@ namespace App\Notifications\Organizations;
 use App\Jobs\Middleware\UseTenantContext;
 use App\Models\OrganizationInvitation as OrganizationInvitationModel;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldBeEncrypted;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
 
-class OrganizationInvitation extends Notification implements ShouldQueue
+class OrganizationInvitation extends Notification implements ShouldBeEncrypted, ShouldQueue
 {
     use Queueable;
 
@@ -18,7 +19,7 @@ class OrganizationInvitation extends Notification implements ShouldQueue
     /**
      * Create a new notification instance.
      */
-    public function __construct(public OrganizationInvitationModel $invitation)
+    public function __construct(public OrganizationInvitationModel $invitation, public string $token)
     {
         $this->organizationPublicId = $invitation->organization->public_id;
     }
@@ -60,7 +61,7 @@ class OrganizationInvitation extends Notification implements ShouldQueue
             ->line(__('Log in and visit your dashboard to accept or decline this invitation.'))
             ->action(
                 __('Log in'),
-                route('login', ['invitation' => $this->invitation->code]),
+                route('login', ['invitation' => $this->token]),
             );
     }
 

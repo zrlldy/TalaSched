@@ -50,7 +50,7 @@ test('database queue stores queued jobs', function () {
     $jobId = Queue::connection('database')->push(new DatabaseBackedInfrastructureProbeJob);
 
     expect($jobId)->not->toBeFalse()
-        ->and(DB::table('jobs')->whereKey($jobId)->where('queue', 'default')->exists())->toBeTrue();
+        ->and(DB::table('jobs')->where('id', $jobId)->where('queue', 'default')->exists())->toBeTrue();
 });
 
 test('database-backed infrastructure verifier passes', function () {
@@ -59,7 +59,5 @@ test('database-backed infrastructure verifier passes', function () {
 
 final class DatabaseBackedInfrastructureProbeJob implements ShouldQueue
 {
-    public function handle(): void
-    {
-    }
+    public function handle(): void {}
 }

@@ -2,6 +2,8 @@
 
 namespace App\Scheduling;
 
+use Carbon\CarbonImmutable;
+
 final readonly class ScheduleEntryData
 {
     /**
@@ -16,5 +18,7 @@ final readonly class ScheduleEntryData
         public array $resources,
         public string $deliveryMode = 'physical',
         public ?string $notes = null,
+        public ?int $existingEntryId = null,
+        public ?CarbonImmutable $occurrenceDate = null,
     ) {}
 }

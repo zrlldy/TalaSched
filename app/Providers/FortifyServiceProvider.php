@@ -117,19 +117,19 @@ class FortifyServiceProvider extends ServiceProvider
     /**
      * Get the pending organization invitation context for auth pages.
      *
-     * @return array{code: string, organizationName: string}|null
+     * @return array{token: string, organizationName: string}|null
      */
     private function organizationInvitation(Request $request): ?array
     {
-        $invitationCode = $request->query('invitation');
+        $invitationToken = $request->query('invitation');
 
-        if (! is_string($invitationCode)) {
+        if (! is_string($invitationToken) || $invitationToken === '') {
             return null;
         }
 
         $invitation = OrganizationInvitation::query()
             ->with('organization')
-            ->where('code', $invitationCode)
+            ->where('token_hash', OrganizationInvitation::hashToken($invitationToken))
             ->whereNull('accepted_at')
             ->where(fn ($query) => $query
                 ->whereNull('expires_at')
@@ -141,7 +141,7 @@ class FortifyServiceProvider extends ServiceProvider
         }
 
         return [
-            'code' => $invitation->code,
+            'token' => $invitationToken,
             'organizationName' => $invitation->organization->name,
         ];
     }

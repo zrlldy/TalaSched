@@ -24,7 +24,7 @@ class CreateOrganizationInvitationRequest extends FormRequest
 
         return [
             'email' => ['required', 'string', 'email', 'max:255', new UniqueOrganizationInvitation($organization)],
-            'role' => ['required', 'string', Rule::enum(OrganizationRole::class)],
+            'role' => ['required', 'string', Rule::in(array_column(OrganizationRole::assignable(), 'value'))],
         ];
     }
 }

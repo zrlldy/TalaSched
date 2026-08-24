@@ -117,7 +117,7 @@ defineProps<{
                 :href="
                     register({
                         query: {
-                            invitation: organizationInvitation?.code,
+                            invitation: organizationInvitation?.token,
                         },
                     })
                 "

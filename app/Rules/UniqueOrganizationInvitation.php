@@ -22,7 +22,11 @@ class UniqueOrganizationInvitation implements ValidationRule
      */
     public function validate(string $attribute, mixed $value, Closure $fail): void
     {
-        $email = strtolower($value);
+        if (! is_string($value)) {
+            return;
+        }
+
+        $email = OrganizationInvitation::normalizeEmail($value);
 
         $isMember = $this->organization->members()
             ->whereRaw('LOWER(email) = ?', [$email])
@@ -35,7 +39,7 @@ class UniqueOrganizationInvitation implements ValidationRule
         }
 
         $hasPendingInvitation = OrganizationInvitation::where('organization_id', $this->organization->id)
-            ->whereRaw('LOWER(email) = ?', [$email])
+            ->where('email_normalized', $email)
             ->whereNull('accepted_at')
             ->where(function ($query) {
                 $query->whereNull('expires_at')

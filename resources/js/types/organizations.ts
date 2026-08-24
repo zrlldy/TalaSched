@@ -9,6 +9,8 @@ export type Organization = {
     isCurrent?: boolean;
 };
 
+export type OrganizationEntitlements = Record<string, boolean | number | null>;
+
 export type OrganizationMember = {
     id: string;
     name: string;
@@ -19,7 +21,7 @@ export type OrganizationMember = {
 };
 
 export type OrganizationInvitation = {
-    code: string;
+    id: string;
     email: string;
     role: OrganizationRole;
     role_label: string;
@@ -27,12 +29,12 @@ export type OrganizationInvitation = {
 };
 
 export type OrganizationInvitationContext = {
-    code: string;
+    token: string;
     organizationName: string;
 };
 
 export type DashboardInvitation = {
-    code: string;
+    id: string;
     inviterName: string;
     organization: {
         name: string;
@@ -48,9 +50,25 @@ export type OrganizationPermissions = {
     canRemoveMember: boolean;
     canCreateInvitation: boolean;
     canCancelInvitation: boolean;
+    canManageCustomRoles: boolean;
+    customRolesEnabled: boolean;
 };
 
 export type RoleOption = {
     value: OrganizationRole;
     label: string;
+};
+
+export type OrganizationRoleDefinition = {
+    code: string;
+    name: string;
+    is_system: boolean;
+    members_count: number;
+    permissions: string[];
+};
+
+export type OrganizationPermissionOption = {
+    code: string;
+    name: string;
+    module: string;
 };

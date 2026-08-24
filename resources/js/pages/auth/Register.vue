@@ -117,7 +117,7 @@ defineOptions({
                     organizationInvitation
                         ? login.url({
                               query: {
-                                  invitation: organizationInvitation.code,
+                                  invitation: organizationInvitation.token,
                               },
                           })
                         : login()

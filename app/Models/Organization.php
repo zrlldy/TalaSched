@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Concerns\GeneratesUniqueOrganizationSlugs;
 use App\Concerns\HasPublicId;
+use App\Enums\OrganizationRole;
 use Database\Factories\OrganizationFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Collection;
@@ -13,6 +14,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
+use LogicException;
 
 /**
  * @property int $id
@@ -39,6 +41,22 @@ class Organization extends Model
     protected static function boot(): void
     {
         parent::boot();
+
+        static::saving(function (Organization $organization): void {
+            if (! $organization->exists || ! $organization->isDirty('owner_user_id')) {
+                return;
+            }
+
+            $hasOwnerMembership = Membership::query()
+                ->where('organization_id', $organization->getKey())
+                ->where('user_id', $organization->owner_user_id)
+                ->where('role', OrganizationRole::Owner->value)
+                ->exists();
+
+            if (! $hasOwnerMembership) {
+                throw new LogicException('Organization ownership must be transferred to an existing owner member.');
+            }
+        });
 
         static::creating(function (Organization $organization) {
             if (empty($organization->slug)) {
@@ -82,6 +100,16 @@ class Organization extends Model
     public function memberships(): HasMany
     {
         return $this->hasMany(Membership::class);
+    }
+
+    /**
+     * Get all normalized roles for this organization.
+     *
+     * @return HasMany<Role, $this>
+     */
+    public function roles(): HasMany
+    {
+        return $this->hasMany(Role::class);
     }
 
     /**

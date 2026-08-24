@@ -1,8 +1,10 @@
 <?php
 
 use App\Enums\OrganizationRole;
+use App\Enums\SubscriptionStatus;
 use App\Models\Organization;
 use App\Models\User;
+use Database\Seeders\SubscriptionCatalogSeeder;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -19,6 +21,7 @@ test('the organizations index page can be rendered', function () {
 });
 
 test('organizations can be created', function () {
+    $this->seed(SubscriptionCatalogSeeder::class);
     $user = User::factory()->create();
 
     $response = $this
@@ -38,6 +41,12 @@ test('organizations can be created', function () {
     expect($user->fresh()->ownsOrganization($organization))->toBeTrue()
         ->and($user->current_organization_id)->toBe($organization->id)
         ->and($organization->owner_user_id)->toBe($user->id);
+
+    $this->assertDatabaseHas('organization_subscriptions', [
+        'organization_id' => $organization->id,
+        'plan_id' => DB::table('plans')->where('code', 'starter')->value('id'),
+        'status' => SubscriptionStatus::Active->value,
+    ]);
 });
 
 test('organization factories create a public identity and matching owner membership', function () {
@@ -70,7 +79,27 @@ test('organization owners cannot be deleted while ownership is retained', functi
         ->and($owner->fresh())->not->toBeNull();
 });
 
+test('organization owner membership cannot be deleted', function () {
+    $organization = Organization::factory()->create();
+    $membership = $organization->memberships()
+        ->where('user_id', $organization->owner_user_id)
+        ->firstOrFail();
+
+    expect(fn () => $membership->delete())->toThrow(LogicException::class)
+        ->and($membership->fresh())->not->toBeNull();
+});
+
+test('a compatibility owner role cannot delete an organization without explicit ownership', function () {
+    $owner = User::factory()->create();
+    $legacyOwner = User::factory()->create();
+    $organization = Organization::factory()->ownedBy($owner)->create();
+
+    expect(fn () => $organization->members()->attach($legacyOwner, ['role' => OrganizationRole::Owner->value]))
+        ->toThrow(LogicException::class, 'Only the explicit organization owner');
+});
+
 test('organization slug uses next available suffix', function () {
+    $this->seed(SubscriptionCatalogSeeder::class);
     $user = User::factory()->create();
 
     Organization::factory()->create(['name' => 'Acme', 'slug' => 'acme']);
@@ -126,9 +155,7 @@ test('organization index exposes public identifiers instead of internal keys', f
 
 test('organizations can be updated by owners', function () {
     $user = User::factory()->create();
-    $organization = Organization::factory()->create(['name' => 'Original Name']);
-
-    $organization->members()->attach($user, ['role' => OrganizationRole::Owner->value]);
+    $organization = Organization::factory()->ownedBy($user)->create(['name' => 'Original Name']);
 
     $response = $this
         ->actingAs($user)
@@ -147,9 +174,8 @@ test('organizations can be updated by owners', function () {
 test('organizations cannot be updated by members', function () {
     $owner = User::factory()->create();
     $member = User::factory()->create();
-    $organization = Organization::factory()->create();
+    $organization = Organization::factory()->ownedBy($owner)->create();
 
-    $organization->members()->attach($owner, ['role' => OrganizationRole::Owner->value]);
     $organization->members()->attach($member, ['role' => OrganizationRole::Member->value]);
 
     $response = $this
@@ -163,9 +189,7 @@ test('organizations cannot be updated by members', function () {
 
 test('numeric organization keys are not accepted by organization routes', function () {
     $user = User::factory()->create();
-    $organization = Organization::factory()->create();
-    $organization->members()->attach($user, ['role' => OrganizationRole::Owner->value]);
-
+    $organization = Organization::factory()->ownedBy($user)->create();
     $this->actingAs($user)
         ->patch(route('organizations.update', ['organization' => $organization->id]), [
             'name' => 'Updated Name',
@@ -197,9 +221,7 @@ test('organizations can be deleted by owners', function () {
 
 test('organization deletion requires name confirmation', function () {
     $user = User::factory()->create();
-    $organization = Organization::factory()->create();
-
-    $organization->members()->attach($user, ['role' => OrganizationRole::Owner->value]);
+    $organization = Organization::factory()->ownedBy($user)->create();
 
     $response = $this
         ->actingAs($user)
@@ -218,14 +240,11 @@ test('organization deletion requires name confirmation', function () {
 test('deleting current organization switches to alphabetically first remaining organization', function () {
     $user = User::factory()->create(['name' => 'Mike']);
 
-    $zuluOrganization = Organization::factory()->create(['name' => 'Zulu Organization']);
-    $zuluOrganization->members()->attach($user, ['role' => OrganizationRole::Owner->value]);
+    $zuluOrganization = Organization::factory()->ownedBy($user)->create(['name' => 'Zulu Organization']);
 
-    $alphaOrganization = Organization::factory()->create(['name' => 'Alpha Organization']);
-    $alphaOrganization->members()->attach($user, ['role' => OrganizationRole::Owner->value]);
+    $alphaOrganization = Organization::factory()->ownedBy($user)->create(['name' => 'Alpha Organization']);
 
-    $betaOrganization = Organization::factory()->create(['name' => 'Beta Organization']);
-    $betaOrganization->members()->attach($user, ['role' => OrganizationRole::Owner->value]);
+    $betaOrganization = Organization::factory()->ownedBy($user)->create(['name' => 'Beta Organization']);
 
     $user->update(['current_organization_id' => $zuluOrganization->id]);
 
@@ -246,8 +265,7 @@ test('deleting current organization switches to alphabetically first remaining o
 
 test('deleting the only current organization clears the current organization', function () {
     $user = User::factory()->create();
-    $organization = Organization::factory()->create(['name' => 'Zulu Organization']);
-    $organization->members()->attach($user, ['role' => OrganizationRole::Owner->value]);
+    $organization = Organization::factory()->ownedBy($user)->create(['name' => 'Zulu Organization']);
 
     $user->update(['current_organization_id' => $organization->id]);
 
@@ -268,10 +286,8 @@ test('deleting the only current organization clears the current organization', f
 
 test('deleting non current organization leaves current organization unchanged', function () {
     $user = User::factory()->create();
-    $currentOrganization = Organization::factory()->create(['name' => 'Current Organization']);
-    $currentOrganization->members()->attach($user, ['role' => OrganizationRole::Owner->value]);
-    $organization = Organization::factory()->create();
-    $organization->members()->attach($user, ['role' => OrganizationRole::Owner->value]);
+    $currentOrganization = Organization::factory()->ownedBy($user)->create(['name' => 'Current Organization']);
+    $organization = Organization::factory()->ownedBy($user)->create();
 
     $user->update(['current_organization_id' => $currentOrganization->id]);
 
@@ -293,9 +309,8 @@ test('deleting non current organization leaves current organization unchanged', 
 test('members can leave organizations', function () {
     $owner = User::factory()->create();
     $member = User::factory()->create();
-    $organization = Organization::factory()->create();
+    $organization = Organization::factory()->ownedBy($owner)->create();
 
-    $organization->members()->attach($owner, ['role' => OrganizationRole::Owner->value]);
     $organization->members()->attach($member, ['role' => OrganizationRole::Member->value]);
 
     $response = $this
@@ -308,12 +323,49 @@ test('members can leave organizations', function () {
     expect($member->fresh()->belongsToOrganization($organization))->toBeFalse();
 });
 
+test('leaving an organization releases reserved member capacity', function () {
+    $this->seed(SubscriptionCatalogSeeder::class);
+    $owner = User::factory()->create();
+    $member = User::factory()->create();
+    $organization = Organization::factory()->ownedBy($owner)->create();
+
+    $organization->members()->attach($member, ['role' => OrganizationRole::Member->value]);
+
+    $timestamp = now();
+    DB::table('organization_subscriptions')->insert([
+        'organization_id' => $organization->id,
+        'plan_id' => DB::table('plans')->where('code', 'starter')->value('id'),
+        'status' => SubscriptionStatus::Active->value,
+        'period_starts_at' => $timestamp,
+        'created_at' => $timestamp,
+        'updated_at' => $timestamp,
+    ]);
+    DB::table('usage_counters')->insert([
+        'organization_id' => $organization->id,
+        'capability_id' => DB::table('capabilities')->where('code', 'max_members')->value('id'),
+        'period_starts_on' => '1900-01-01',
+        'period_ends_on' => '9999-12-31',
+        'quantity' => 2,
+        'created_at' => $timestamp,
+        'updated_at' => $timestamp,
+    ]);
+
+    $this
+        ->actingAs($member)
+        ->delete(route('organizations.leave', $organization))
+        ->assertRedirect(route('organizations.index'));
+
+    expect(DB::table('usage_counters')
+        ->where('organization_id', $organization->id)
+        ->where('capability_id', DB::table('capabilities')->where('code', 'max_members')->value('id'))
+        ->value('quantity'))->toBe(1);
+});
+
 test('leaving current organization switches to alphabetically first remaining organization', function () {
     $owner = User::factory()->create();
     $member = User::factory()->create(['name' => 'Mike']);
 
-    $zuluOrganization = Organization::factory()->create(['name' => 'Zulu Organization']);
-    $zuluOrganization->members()->attach($owner, ['role' => OrganizationRole::Owner->value]);
+    $zuluOrganization = Organization::factory()->ownedBy($owner)->create(['name' => 'Zulu Organization']);
     $zuluOrganization->members()->attach($member, ['role' => OrganizationRole::Member->value]);
 
     $alphaOrganization = Organization::factory()->create(['name' => 'Alpha Organization']);
@@ -337,8 +389,7 @@ test('leaving current organization switches to alphabetically first remaining or
 test('leaving the only current organization clears the current organization', function () {
     $owner = User::factory()->create();
     $member = User::factory()->create();
-    $organization = Organization::factory()->create();
-    $organization->members()->attach($owner, ['role' => OrganizationRole::Owner->value]);
+    $organization = Organization::factory()->ownedBy($owner)->create();
     $organization->members()->attach($member, ['role' => OrganizationRole::Member->value]);
     $member->update(['current_organization_id' => $organization->id]);
 
@@ -354,9 +405,7 @@ test('leaving the only current organization clears the current organization', fu
 
 test('organization owners cannot leave their organization', function () {
     $owner = User::factory()->create();
-    $organization = Organization::factory()->create();
-
-    $organization->members()->attach($owner, ['role' => OrganizationRole::Owner->value]);
+    $organization = Organization::factory()->ownedBy($owner)->create();
 
     $response = $this
         ->actingAs($owner)
@@ -382,8 +431,7 @@ test('deleting organization clears affected users without another organization',
     $owner = User::factory()->create();
     $member = User::factory()->create();
 
-    $organization = Organization::factory()->create();
-    $organization->members()->attach($owner, ['role' => OrganizationRole::Owner->value]);
+    $organization = Organization::factory()->ownedBy($owner)->create();
     $organization->members()->attach($member, ['role' => OrganizationRole::Member->value]);
 
     $owner->update(['current_organization_id' => $organization->id]);
@@ -420,9 +468,8 @@ test('owners can delete their only organization', function () {
 test('organizations cannot be deleted by non owners', function () {
     $owner = User::factory()->create();
     $member = User::factory()->create();
-    $organization = Organization::factory()->create();
+    $organization = Organization::factory()->ownedBy($owner)->create();
 
-    $organization->members()->attach($owner, ['role' => OrganizationRole::Owner->value]);
     $organization->members()->attach($member, ['role' => OrganizationRole::Member->value]);
 
     $response = $this

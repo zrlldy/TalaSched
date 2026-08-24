@@ -16,4 +16,36 @@ enum CapabilityKey: string
     case ApiAccess = 'api_access';
     case MaxMembers = 'max_members';
     case MaxActiveTimetables = 'max_active_timetables';
+
+    /**
+     * Get the stable display name for the capability.
+     */
+    public function label(): string
+    {
+        return match ($this) {
+            self::ManualScheduling => 'Manual scheduling',
+            self::AutomaticScheduling => 'Automatic scheduling',
+            self::CustomSchedulingRules => 'Custom scheduling rules',
+            self::CustomExcelTemplates => 'Custom Excel templates',
+            self::ApprovalWorkflows => 'Approval workflows',
+            self::TimetableVersioning => 'Timetable versioning',
+            self::FacultyWorkloadReports => 'Faculty workload reports',
+            self::CustomRoles => 'Custom roles',
+            self::MultiCampus => 'Multi-campus organizations',
+            self::ApiAccess => 'API access',
+            self::MaxMembers => 'Maximum members',
+            self::MaxActiveTimetables => 'Maximum active timetables',
+        };
+    }
+
+    /**
+     * Get the storage type used by the capability catalog.
+     */
+    public function valueType(): string
+    {
+        return match ($this) {
+            self::MaxMembers, self::MaxActiveTimetables => 'integer',
+            default => 'boolean',
+        };
+    }
 }

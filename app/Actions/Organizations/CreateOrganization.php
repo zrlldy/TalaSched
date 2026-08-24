@@ -5,10 +5,16 @@ namespace App\Actions\Organizations;
 use App\Enums\OrganizationRole;
 use App\Models\Organization;
 use App\Models\User;
+use App\Subscriptions\ProvisionOrganizationSubscription;
 use Illuminate\Support\Facades\DB;
 
 class CreateOrganization
 {
+    public function __construct(
+        private ProvisionOrganizationAuthorization $provisionAuthorization,
+        private ProvisionOrganizationSubscription $provisionSubscription,
+    ) {}
+
     /**
      * Create a new organization and add the user as owner.
      */
@@ -24,6 +30,9 @@ class CreateOrganization
                 'user_id' => $user->id,
                 'role' => OrganizationRole::Owner,
             ]);
+
+            $this->provisionSubscription->handle($organization);
+            $this->provisionAuthorization->handle($organization);
 
             $user->switchOrganization($organization);
 

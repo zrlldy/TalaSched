@@ -29,4 +29,17 @@ class AcademicPeriodFactory extends Factory
             'ends_on' => fn (array $attributes) => AcademicYear::findOrFail($attributes['academic_year_id'])->starts_on->copy()->addMonths(4),
         ];
     }
+
+    /**
+     * Create the period within an existing academic year.
+     */
+    public function forAcademicYear(AcademicYear $academicYear): static
+    {
+        return $this->state(fn (array $attributes): array => [
+            'academic_year_id' => $academicYear->getKey(),
+            'organization_id' => $academicYear->organization_id,
+            'starts_on' => $academicYear->starts_on,
+            'ends_on' => $academicYear->ends_on,
+        ]);
+    }
 }

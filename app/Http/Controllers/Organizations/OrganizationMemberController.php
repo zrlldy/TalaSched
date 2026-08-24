@@ -2,11 +2,14 @@
 
 namespace App\Http\Controllers\Organizations;
 
+use App\Actions\Organizations\ProvisionOrganizationAuthorization;
+use App\Enums\CapabilityKey;
 use App\Enums\OrganizationRole;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Organizations\UpdateOrganizationMemberRequest;
 use App\Models\Membership;
 use App\Models\Organization;
+use App\Subscriptions\UsageService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
@@ -14,6 +17,11 @@ use Inertia\Inertia;
 
 class OrganizationMemberController extends Controller
 {
+    public function __construct(
+        private ProvisionOrganizationAuthorization $provisionAuthorization,
+        private UsageService $usage,
+    ) {}
+
     /**
      * Update the specified organization member's role.
      */
@@ -21,11 +29,14 @@ class OrganizationMemberController extends Controller
     {
         $this->ensureMembershipBelongsToOrganization($membership, $organization);
 
-        Gate::authorize('updateMember', $organization);
-
         $newRole = OrganizationRole::from($request->validated('role'));
 
-        $membership->update(['role' => $newRole]);
+        Gate::authorize('update', [$membership, $newRole]);
+
+        DB::transaction(function () use ($membership, $organization, $newRole): void {
+            $membership->update(['role' => $newRole]);
+            $this->provisionAuthorization->handle($organization);
+        });
 
         Inertia::flash('toast', ['type' => 'success', 'message' => __('Member role updated.')]);
 
@@ -39,18 +50,26 @@ class OrganizationMemberController extends Controller
     {
         $this->ensureMembershipBelongsToOrganization($membership, $organization);
 
-        Gate::authorize('removeMember', $organization);
+        Gate::authorize('delete', $membership);
 
-        $user = $membership->user;
+        DB::transaction(function () use ($membership, $organization): void {
+            $lockedOrganization = Organization::query()
+                ->whereKey($organization->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+            $lockedMembership = Membership::query()
+                ->whereKey($membership->id)
+                ->where('organization_id', $lockedOrganization->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+            $user = $lockedMembership->user;
 
-        abort_if($organization->owner()?->is($user), 403, __('The organization owner cannot be removed.'));
-
-        DB::transaction(function () use ($membership, $organization, $user): void {
             if ($user->isCurrentOrganization($organization)) {
                 $user->switchToFallbackOrganization($organization);
             }
 
-            $membership->delete();
+            $this->usage->releaseIfReserved($lockedOrganization, CapabilityKey::MaxMembers);
+            $lockedMembership->delete();
         });
 
         Inertia::flash('toast', ['type' => 'success', 'message' => __('Member removed.')]);

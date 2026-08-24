@@ -1,6 +1,5 @@
 <?php
 
-use App\Enums\OrganizationRole;
 use App\Models\Organization;
 use App\Models\OrganizationInvitation;
 use App\Models\User;
@@ -25,12 +24,24 @@ test('authenticated users can visit the dashboard', function () {
     $response->assertOk();
 });
 
+test('dashboard shares the current organization entitlement map', function () {
+    $user = User::factory()->withOwnedOrganization()->create();
+    grantManualSchedulingEntitlement($user->currentOrganization);
+
+    $response = $this
+        ->actingAs($user)
+        ->get(route('dashboard'));
+
+    $response->assertInertia(fn (Assert $page) => $page
+        ->where('entitlements.manual_scheduling', true)
+        ->where('entitlements.max_members', null),
+    );
+});
+
 test('dashboard includes pending invitations for the authenticated user', function () {
     $owner = User::factory()->create(['name' => 'Taylor Otwell']);
     $invitedUser = User::factory()->withOwnedOrganization()->create(['email' => 'invited@example.com']);
-    $organization = Organization::factory()->create(['name' => 'Laravel Organization']);
-
-    $organization->members()->attach($owner, ['role' => OrganizationRole::Owner->value]);
+    $organization = Organization::factory()->ownedBy($owner)->create(['name' => 'Laravel Organization']);
 
     $invitation = OrganizationInvitation::factory()->create([
         'organization_id' => $organization->id,
@@ -46,7 +57,7 @@ test('dashboard includes pending invitations for the authenticated user', functi
     $response->assertInertia(fn (Assert $page) => $page
         ->component('Dashboard')
         ->has('pendingInvitations', 1)
-        ->where('pendingInvitations.0.code', $invitation->code)
+        ->where('pendingInvitations.0.id', $invitation->public_id)
         ->where('pendingInvitations.0.inviterName', 'Taylor Otwell')
         ->where('pendingInvitations.0.organization.name', 'Laravel Organization')
         ->where('pendingInvitations.0.organization.slug', $organization->slug)
@@ -57,9 +68,7 @@ test('dashboard includes pending invitations for the authenticated user', functi
 test('dashboard does not include accepted invitations', function () {
     $owner = User::factory()->create();
     $invitedUser = User::factory()->withOwnedOrganization()->create(['email' => 'invited@example.com']);
-    $organization = Organization::factory()->create();
-
-    $organization->members()->attach($owner, ['role' => OrganizationRole::Owner->value]);
+    $organization = Organization::factory()->ownedBy($owner)->create();
 
     OrganizationInvitation::factory()->accepted()->create([
         'organization_id' => $organization->id,
@@ -81,9 +90,7 @@ test('dashboard does not include accepted invitations', function () {
 test('dashboard excludes expired invitations without deleting them', function () {
     $owner = User::factory()->create();
     $invitedUser = User::factory()->withOwnedOrganization()->create(['email' => 'invited@example.com']);
-    $organization = Organization::factory()->create();
-
-    $organization->members()->attach($owner, ['role' => OrganizationRole::Owner->value]);
+    $organization = Organization::factory()->ownedBy($owner)->create();
 
     $invitation = OrganizationInvitation::factory()->expired()->create([
         'organization_id' => $organization->id,
@@ -109,9 +116,7 @@ test('dashboard excludes expired invitations without deleting them', function ()
 test('dashboard does not include or delete other users invitations', function () {
     $owner = User::factory()->create();
     $invitedUser = User::factory()->withOwnedOrganization()->create(['email' => 'invited@example.com']);
-    $organization = Organization::factory()->create();
-
-    $organization->members()->attach($owner, ['role' => OrganizationRole::Owner->value]);
+    $organization = Organization::factory()->ownedBy($owner)->create();
 
     $invitation = OrganizationInvitation::factory()->expired()->create([
         'organization_id' => $organization->id,

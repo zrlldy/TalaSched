@@ -3,6 +3,7 @@
 use App\Http\Controllers\Organizations\OrganizationController;
 use App\Http\Controllers\Organizations\OrganizationInvitationController;
 use App\Http\Controllers\Organizations\OrganizationMemberController;
+use App\Http\Controllers\Organizations\OrganizationRoleController;
 use App\Http\Controllers\Settings\ProfileController;
 use App\Http\Controllers\Settings\SecurityController;
 use App\Http\Middleware\EnsureOrganizationMembership;
@@ -41,6 +42,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
         Route::patch('settings/organizations/{organization:slug}/members/{membership:public_id}', [OrganizationMemberController::class, 'update'])->name('organizations.members.update');
         Route::delete('settings/organizations/{organization:slug}/members/{membership:public_id}', [OrganizationMemberController::class, 'destroy'])->name('organizations.members.destroy');
+
+        Route::post('settings/organizations/{organization:slug}/roles', [OrganizationRoleController::class, 'store'])->name('organizations.roles.store');
+        Route::patch('settings/organizations/{organization:slug}/roles/{role:code}', [OrganizationRoleController::class, 'update'])->name('organizations.roles.update');
+        Route::delete('settings/organizations/{organization:slug}/roles/{role:code}', [OrganizationRoleController::class, 'destroy'])->name('organizations.roles.destroy');
 
         Route::post('settings/organizations/{organization:slug}/invitations', [OrganizationInvitationController::class, 'store'])->name('organizations.invitations.store');
         Route::delete('settings/organizations/{organization:slug}/invitations/{invitation}', [OrganizationInvitationController::class, 'destroy'])->name('organizations.invitations.destroy');

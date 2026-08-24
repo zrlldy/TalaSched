@@ -25,15 +25,17 @@ class EnsureOrganizationMembership
 
         abort_if(! $user || ! $organization || ! $user->belongsToOrganization($organization), 403);
 
-        $this->ensureOrganizationMemberHasRequiredRole($user, $organization, $minimumRole);
-
-        if ($request->route('current_organization') && ! $user->isCurrentOrganization($organization)) {
-            $user->switchOrganization($organization);
-        }
-
         return $this->tenantContext->run(
             $organization,
-            fn (): Response => $next($request),
+            function () use ($request, $next, $user, $minimumRole, $organization): Response {
+                $this->ensureOrganizationMemberHasRequiredRole($user, $organization, $minimumRole);
+
+                if ($request->route('current_organization') && ! $user->isCurrentOrganization($organization)) {
+                    $user->switchOrganization($organization);
+                }
+
+                return $next($request);
+            },
         );
     }
 

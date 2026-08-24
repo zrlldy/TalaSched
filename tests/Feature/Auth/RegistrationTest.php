@@ -1,6 +1,5 @@
 <?php
 
-use App\Enums\OrganizationRole;
 use App\Models\Organization;
 use App\Models\OrganizationInvitation;
 use App\Models\User;
@@ -14,21 +13,19 @@ test('registration screen can be rendered', function () {
 
 test('registration screen includes organization invitation context', function () {
     $owner = User::factory()->create();
-    $organization = Organization::factory()->create(['name' => 'Laravel Organization']);
-    $organization->members()->attach($owner, ['role' => OrganizationRole::Owner->value]);
-
+    $organization = Organization::factory()->ownedBy($owner)->create(['name' => 'Laravel Organization']);
     $invitation = OrganizationInvitation::factory()->create([
         'organization_id' => $organization->id,
         'email' => 'invited@example.com',
         'invited_by' => $owner->id,
     ]);
 
-    $response = $this->get(route('register', ['invitation' => $invitation->code]));
+    $response = $this->get(route('register', ['invitation' => $invitation->plainTextToken()]));
 
     $response->assertOk();
     $response->assertInertia(fn (Assert $page) => $page
         ->component('auth/Register')
-        ->where('organizationInvitation.code', $invitation->code)
+        ->where('organizationInvitation.token', $invitation->plainTextToken())
         ->where('organizationInvitation.organizationName', 'Laravel Organization'),
     );
 });
