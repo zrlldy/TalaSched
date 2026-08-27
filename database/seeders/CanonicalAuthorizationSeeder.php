@@ -17,6 +17,8 @@ class CanonicalAuthorizationSeeder extends Seeder
 
         Organization::query()
             ->orderBy('id')
-            ->eachById(fn (Organization $organization): mixed => $provisioner->handle($organization, $permissions));
+            ->eachById(function (Organization $organization) use ($provisioner, $permissions): void {
+                $provisioner->handle($organization, $permissions);
+            });
     }
 }

@@ -21,12 +21,23 @@ class AcademicPeriodFactory extends Factory
     {
         return [
             'academic_year_id' => AcademicYear::factory(),
-            'organization_id' => fn (array $attributes): int => AcademicYear::findOrFail($attributes['academic_year_id'])->organization_id,
+            'organization_id' => fn (array $attributes): int => AcademicYear::query()
+                ->whereKey((int) $attributes['academic_year_id'])
+                ->firstOrFail()
+                ->organization_id,
             'name' => 'Term 1',
             'kind' => AcademicPeriodKind::Term,
             'sequence' => 1,
-            'starts_on' => fn (array $attributes) => AcademicYear::findOrFail($attributes['academic_year_id'])->starts_on,
-            'ends_on' => fn (array $attributes) => AcademicYear::findOrFail($attributes['academic_year_id'])->starts_on->copy()->addMonths(4),
+            'starts_on' => fn (array $attributes) => AcademicYear::query()
+                ->whereKey((int) $attributes['academic_year_id'])
+                ->firstOrFail()
+                ->starts_on,
+            'ends_on' => fn (array $attributes) => AcademicYear::query()
+                ->whereKey((int) $attributes['academic_year_id'])
+                ->firstOrFail()
+                ->starts_on
+                ->copy()
+                ->addMonths(4),
         ];
     }
 

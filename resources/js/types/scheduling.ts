@@ -27,11 +27,7 @@ export type ScheduleIssue = {
 };
 
 export type TimetableViewScope =
-    | 'organization'
-    | 'teacher'
-    | 'student_group'
-    | 'room'
-    | 'unit';
+    'organization' | 'teacher' | 'student_group' | 'room' | 'unit';
 
 export type TimetableViewResource = {
     id: string;

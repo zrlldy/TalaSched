@@ -22,12 +22,17 @@ class CreateApprovalWorkflowVersion
     /**
      * @param  list<array<string, mixed>>  $steps
      */
-    public function handle(Organization $organization, User $actor, string $name, array $steps): int
-    {
-        return $this->tenantContext->run($organization, function () use ($organization, $actor, $name, $steps): int {
+    public function handle(
+        Organization $organization,
+        User $actor,
+        string $name,
+        array $steps,
+        bool $requireDistinctApprovers = false,
+    ): int {
+        return $this->tenantContext->run($organization, function () use ($organization, $actor, $name, $steps, $requireDistinctApprovers): int {
             $this->authorizer->authorize($organization, $actor);
 
-            return DB::transaction(function () use ($organization, $actor, $name, $steps): int {
+            return DB::transaction(function () use ($organization, $actor, $name, $steps, $requireDistinctApprovers): int {
                 $name = trim($name);
 
                 if ($name === '') {
@@ -59,6 +64,7 @@ class CreateApprovalWorkflowVersion
                 $versionId = DB::table('approval_workflow_versions')->insertGetId([
                     'organization_id' => $organization->id,
                     'approval_workflow_id' => $workflow->id,
+                    'require_distinct_approvers' => $requireDistinctApprovers,
                     'version_number' => $versionNumber,
                     'activated_at' => null,
                     'created_at' => now(),
@@ -71,6 +77,7 @@ class CreateApprovalWorkflowVersion
                         'approval_workflow_version_id' => $versionId,
                         'sequence' => $step['sequence'],
                         'label' => $step['label'],
+                        'academic_unit_id' => $step['academic_unit_id'],
                         'approver_selector_type' => $step['approver_selector_type'],
                         'required_permission' => $step['required_permission'],
                         'minimum_approvals' => $step['minimum_approvals'],

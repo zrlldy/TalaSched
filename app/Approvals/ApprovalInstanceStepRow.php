@@ -12,6 +12,7 @@ class ApprovalInstanceStepRow
     public function __construct(
         public int $id,
         public string $status,
+        public ?int $academicUnitId,
         public bool $allowSelfApproval,
         public ?string $approverSelectorType,
         public ?string $requiredPermission,
@@ -29,6 +30,7 @@ class ApprovalInstanceStepRow
         return new self(
             id: (int) $row->id,
             status: (string) $row->status,
+            academicUnitId: $row->academic_unit_id === null ? null : (int) $row->academic_unit_id,
             allowSelfApproval: (bool) $row->allow_self_approval,
             approverSelectorType: is_string($row->approver_selector_type) ? $row->approver_selector_type : null,
             requiredPermission: is_string($row->required_permission) ? $row->required_permission : null,

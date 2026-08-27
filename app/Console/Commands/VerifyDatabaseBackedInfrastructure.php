@@ -5,9 +5,11 @@ namespace App\Console\Commands;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
+use Illuminate\Contracts\Cache\LockProvider;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use LogicException;
 use Throwable;
 
 #[Signature('infrastructure:verify-database-drivers')]
@@ -114,7 +116,13 @@ class VerifyDatabaseBackedInfrastructure extends Command
         $key = 'infrastructure:database-lock:'.(string) Str::uuid();
 
         try {
-            $lock = Cache::store('database')->lock($key, 10);
+            $store = Cache::store('database')->getStore();
+
+            if (! $store instanceof LockProvider) {
+                throw new LogicException('The database cache store does not provide cache locks.');
+            }
+
+            $lock = $store->lock($key, 10);
             $acquired = $lock->get();
 
             if ($acquired) {

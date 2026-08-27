@@ -7,6 +7,7 @@ use App\Approvals\SubmitTimetableForApproval;
 use App\Enums\OrganizationPermission;
 use App\Enums\OrganizationRole;
 use App\Models\AcademicPeriod;
+use App\Models\AcademicUnit;
 use App\Models\AcademicYear;
 use App\Models\Timetable;
 use App\Models\TimetableVersion;
@@ -16,12 +17,13 @@ use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
-function approvalWorkflowSteps(): array
+function approvalWorkflowSteps(?AcademicUnit $academicUnit = null): array
 {
     return [
         [
             'sequence' => 1,
             'label' => 'Scheduling review',
+            'academic_unit_public_id' => $academicUnit?->public_id,
             'approver_selector_type' => 'permission',
             'required_permission' => OrganizationPermission::ManageScheduling->value,
             'minimum_approvals' => 1,
@@ -31,6 +33,7 @@ function approvalWorkflowSteps(): array
         [
             'sequence' => 2,
             'label' => 'Administrative review',
+            'academic_unit_public_id' => $academicUnit?->public_id,
             'approver_selector_type' => 'role',
             'role_codes' => [OrganizationRole::Admin->value],
             'minimum_approvals' => 1,
@@ -47,8 +50,15 @@ beforeEach(function () {
 });
 
 test('workflow authoring creates immutable versions and snapshots role selectors', function () {
+    $academicUnit = AcademicUnit::factory()->forOrganization($this->organization)->create();
     $action = app(CreateApprovalWorkflowVersion::class);
-    $firstVersionId = $action->handle($this->organization, $this->owner, 'Academic review', approvalWorkflowSteps());
+    $firstVersionId = $action->handle(
+        $this->organization,
+        $this->owner,
+        'Academic review',
+        approvalWorkflowSteps($academicUnit),
+        requireDistinctApprovers: true,
+    );
     $secondVersionId = $action->handle($this->organization, $this->owner, 'Academic review', approvalWorkflowSteps());
 
     $workflow = DB::table('approval_workflows')->where('organization_id', $this->organization->id)->first();
@@ -61,8 +71,33 @@ test('workflow authoring creates immutable versions and snapshots role selectors
         ->and(DB::table('approval_workflows')->where('organization_id', $this->organization->id)->count())->toBe(1)
         ->and((bool) $workflow->is_active)->toBeFalse()
         ->and(DB::table('approval_workflow_versions')->where('approval_workflow_id', $workflow->id)->count())->toBe(2)
+        ->and((bool) DB::table('approval_workflow_versions')->where('id', $firstVersionId)->value('require_distinct_approvers'))->toBeTrue()
+        ->and((bool) DB::table('approval_workflow_versions')->where('id', $secondVersionId)->value('require_distinct_approvers'))->toBeFalse()
+        ->and(DB::table('approval_workflow_steps')->where('id', DB::table('approval_workflow_steps')->where('approval_workflow_version_id', $firstVersionId)->where('sequence', 1)->value('id'))->value('academic_unit_id'))->toBe($academicUnit->id)
         ->and(DB::table('approval_step_roles')->where('approval_workflow_step_id', $roleStep->id)->count())->toBe(1)
         ->and(DB::table('audit_events')->where('action', 'approval_workflow.version_created')->count())->toBe(2);
+});
+
+test('workflow authoring rejects foreign and deleted academic-unit targets', function () {
+    $foreignOwner = User::factory()->withOwnedOrganization()->create();
+    $foreignUnit = AcademicUnit::factory()->forOrganization($foreignOwner->currentOrganization)->create();
+
+    expect(fn () => app(CreateApprovalWorkflowVersion::class)->handle(
+        $this->organization,
+        $this->owner,
+        'Foreign academic review',
+        approvalWorkflowSteps($foreignUnit),
+    ))->toThrow(InvalidArgumentException::class, 'active organization unit');
+
+    $deletedUnit = AcademicUnit::factory()->forOrganization($this->organization)->create();
+    $deletedUnit->delete();
+
+    expect(fn () => app(CreateApprovalWorkflowVersion::class)->handle(
+        $this->organization,
+        $this->owner,
+        'Deleted academic review',
+        approvalWorkflowSteps($deletedUnit),
+    ))->toThrow(InvalidArgumentException::class, 'active organization unit');
 });
 
 test('workflow activation validates steps and retirement disables future use', function () {

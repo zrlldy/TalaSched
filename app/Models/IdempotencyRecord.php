@@ -6,7 +6,11 @@ use Database\Factories\IdempotencyRecordFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Carbon;
 
+/**
+ * @property Carbon|null $expires_at
+ */
 #[Fillable(['organization_id', 'actor_user_id', 'route', 'key_hash', 'request_hash', 'status', 'response_status', 'response_body', 'expires_at'])]
 class IdempotencyRecord extends Model
 {

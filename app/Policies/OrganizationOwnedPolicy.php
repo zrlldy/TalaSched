@@ -79,6 +79,8 @@ abstract class OrganizationOwnedPolicy
 
         $organizationId = $model->getAttribute('organization_id');
 
-        return $organizationId === null ? null : Organization::query()->find($organizationId);
+        return $organizationId === null
+            ? null
+            : Organization::query()->whereKey($organizationId)->first();
     }
 }

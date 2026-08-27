@@ -38,6 +38,14 @@ return [
             'report' => false,
         ],
 
+        'signatures' => [
+            'driver' => 'local',
+            'root' => storage_path('app/private/signatures'),
+            'serve' => false,
+            'throw' => false,
+            'report' => true,
+        ],
+
         'public' => [
             'driver' => 'local',
             'root' => storage_path('app/public'),

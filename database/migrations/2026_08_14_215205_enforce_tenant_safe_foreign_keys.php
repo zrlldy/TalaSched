@@ -154,7 +154,9 @@ return new class extends Migration
             Schema::table($table, fn (Blueprint $blueprint) => $blueprint->foreignId('organization_id')->nullable());
 
             DB::table($table)->update([
-                'organization_id' => DB::raw("(SELECT organization_id FROM {$sourceTable} WHERE {$sourceTable}.id = {$table}.{$sourceKey})"),
+                'organization_id' => DB::table($sourceTable)
+                    ->select('organization_id')
+                    ->whereColumn("{$sourceTable}.id", "{$table}.{$sourceKey}"),
             ]);
         }
     }

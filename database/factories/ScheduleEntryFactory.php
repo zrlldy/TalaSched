@@ -75,9 +75,15 @@ class ScheduleEntryFactory extends Factory
     {
         return [
             'timetable_version_id' => TimetableVersion::factory(),
-            'organization_id' => fn (array $attributes): int => TimetableVersion::findOrFail($attributes['timetable_version_id'])->organization_id,
+            'organization_id' => fn (array $attributes): int => TimetableVersion::query()
+                ->whereKey((int) $attributes['timetable_version_id'])
+                ->firstOrFail()
+                ->organization_id,
             'offering_component_id' => function (array $attributes): int {
-                $version = TimetableVersion::with('timetable')->findOrFail($attributes['timetable_version_id']);
+                $version = TimetableVersion::query()
+                    ->with('timetable')
+                    ->whereKey((int) $attributes['timetable_version_id'])
+                    ->firstOrFail();
                 $offering = SubjectOffering::factory()->create([
                     'organization_id' => $attributes['organization_id'],
                     'academic_period_id' => $version->timetable->academic_period_id,

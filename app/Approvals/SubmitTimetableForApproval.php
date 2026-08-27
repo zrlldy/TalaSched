@@ -100,6 +100,7 @@ class SubmitTimetableForApproval
                     'approval_instance_id' => $instanceId,
                     'sequence' => $step->sequence,
                     'label' => $step->label,
+                    'academic_unit_id' => $step->academic_unit_id,
                     'approver_selector_type' => $step->approver_selector_type,
                     'required_permission' => $step->required_permission,
                     'approver_role_codes' => $roleCodes === null ? null : json_encode($roleCodes, JSON_THROW_ON_ERROR),

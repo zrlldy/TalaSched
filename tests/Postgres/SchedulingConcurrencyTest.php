@@ -106,7 +106,7 @@ function runConcurrentSchedulePair(Organization $organization, array $scenario):
     try {
         $deadline = microtime(true) + 10;
 
-        while (collect($readyPaths)->filter('file_exists')->count() < count($readyPaths)) {
+        while (collect($readyPaths)->filter(fn (string $path): bool => file_exists($path))->count() < count($readyPaths)) {
             if (microtime(true) > $deadline) {
                 throw new RuntimeException('Scheduling concurrency workers did not reach the barrier.');
             }

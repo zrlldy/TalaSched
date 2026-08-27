@@ -3,6 +3,7 @@
 namespace App\Approvals;
 
 use App\Enums\OrganizationPermission;
+use App\Models\AcademicUnit;
 use App\Models\Organization;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
@@ -14,6 +15,7 @@ class ValidateApprovalWorkflowVersion
      * @return list<array{
      *     sequence: int,
      *     label: string,
+     *     academic_unit_id: int|null,
      *     approver_selector_type: string,
      *     required_permission: string|null,
      *     role_codes: list<string>,
@@ -33,6 +35,7 @@ class ValidateApprovalWorkflowVersion
         foreach ($steps as $index => $step) {
             $sequence = (int) ($step['sequence'] ?? 0);
             $label = trim((string) ($step['label'] ?? ''));
+            $academicUnitId = $this->academicUnitId($organization, $step);
             $selectorType = (string) ($step['approver_selector_type'] ?? '');
             $requiredPermission = ($step['required_permission'] ?? null) === null
                 ? null
@@ -84,6 +87,7 @@ class ValidateApprovalWorkflowVersion
             $normalized[] = [
                 'sequence' => $sequence,
                 'label' => $label,
+                'academic_unit_id' => $academicUnitId,
                 'approver_selector_type' => $selectorType,
                 'required_permission' => $requiredPermission,
                 'role_codes' => $roleCodes,
@@ -94,6 +98,57 @@ class ValidateApprovalWorkflowVersion
         }
 
         return $normalized;
+    }
+
+    /**
+     * Resolve the public academic-unit input used by authoring or validate a persisted tenant key.
+     *
+     * @param  array<string, mixed>  $step
+     */
+    private function academicUnitId(Organization $organization, array $step): ?int
+    {
+        $publicId = $step['academic_unit_public_id'] ?? null;
+        $internalId = $step['academic_unit_id'] ?? null;
+
+        if ($publicId !== null && $internalId !== null) {
+            throw new InvalidArgumentException('Approval workflow steps may use only one academic-unit identifier.');
+        }
+
+        if ($publicId !== null) {
+            if (! is_string($publicId) || trim($publicId) === '') {
+                throw new InvalidArgumentException('Approval workflow academic-unit identifiers must be public UUIDs.');
+            }
+
+            $academicUnit = AcademicUnit::query()
+                ->where('organization_id', $organization->id)
+                ->where('public_id', trim($publicId))
+                ->first();
+
+            if ($academicUnit === null) {
+                throw new InvalidArgumentException('Approval workflow academic-unit selectors must reference an active organization unit.');
+            }
+
+            return $academicUnit->getKey();
+        }
+
+        if ($internalId === null) {
+            return null;
+        }
+
+        if (! is_int($internalId) && ! (is_string($internalId) && ctype_digit($internalId))) {
+            throw new InvalidArgumentException('Persisted approval workflow academic-unit selectors must use internal keys.');
+        }
+
+        $academicUnit = AcademicUnit::query()
+            ->where('organization_id', $organization->id)
+            ->whereKey((int) $internalId)
+            ->first();
+
+        if ($academicUnit === null) {
+            throw new InvalidArgumentException('Approval workflow academic-unit selectors must reference an active organization unit.');
+        }
+
+        return $academicUnit->getKey();
     }
 
     /**

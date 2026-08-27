@@ -9,11 +9,14 @@ use App\Enums\ApprovalInstanceStepStatus;
 use App\Enums\OrganizationPermission;
 use App\Enums\TimetableVersionStatus;
 use App\Exceptions\ScheduleConflictException;
+use App\Models\AcademicUnit;
+use App\Models\AcademicUnitClosure;
 use App\Models\Organization;
 use App\Models\TimetableVersion;
 use App\Models\User;
 use App\Scheduling\ValidateTimetableVersion;
 use DomainException;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
 
 class DecideTimetableApproval
@@ -46,6 +49,10 @@ class DecideTimetableApproval
                 throw new DomainException('The approval instance could not be found.');
             }
             $instance = ApprovalInstanceRow::from($instance);
+            $requiresDistinctApprovers = (bool) DB::table('approval_workflow_versions')
+                ->where('organization_id', $instance->organizationId)
+                ->where('id', $instance->approvalWorkflowVersionId)
+                ->value('require_distinct_approvers');
 
             $existingAction = DB::table('approval_actions')
                 ->where('organization_id', $instance->organizationId)
@@ -86,9 +93,15 @@ class DecideTimetableApproval
                 throw new DomainException('The approval instance has no active step.');
             }
             $activeStep = ApprovalInstanceStepRow::from($activeStep);
+            $academicUnit = $activeStep->academicUnitId === null
+                ? null
+                : AcademicUnit::query()
+                    ->where('organization_id', $organization->id)
+                    ->whereKey($activeStep->academicUnitId)
+                    ->firstOrFail();
 
             if ($decision !== ApprovalDecision::Cancel) {
-                $this->authorizeStep($instance, $activeStep, $organization, $actor);
+                $this->authorizeStep($instance, $activeStep, $organization, $actor, $academicUnit, $requiresDistinctApprovers);
             } elseif (
                 $instance->submittedBy !== $actor->id
                 && ! $actor->hasOrganizationPermission($organization, OrganizationPermission::ManageScheduling)
@@ -160,43 +173,89 @@ class DecideTimetableApproval
         }, attempts: 3);
     }
 
-    private function authorizeStep(ApprovalInstanceRow $instance, ApprovalInstanceStepRow $step, Organization $organization, User $actor): void
-    {
+    private function authorizeStep(
+        ApprovalInstanceRow $instance,
+        ApprovalInstanceStepRow $step,
+        Organization $organization,
+        User $actor,
+        ?AcademicUnit $academicUnit,
+        bool $requiresDistinctApprovers,
+    ): void {
         if (! $step->allowSelfApproval && $instance->submittedBy === $actor->id) {
             throw new DomainException('The submitter cannot approve this workflow step.');
         }
 
         $selectorType = $step->approverSelectorType;
+        $isEligible = false;
 
         if ($selectorType === 'permission') {
             $permission = OrganizationPermission::tryFrom((string) $step->requiredPermission);
 
-            if ($permission !== null && $actor->hasOrganizationPermission($organization, $permission)) {
-                return;
+            if ($permission !== null && $actor->hasOrganizationPermission($organization, $permission, $academicUnit)) {
+                $isEligible = true;
             }
         }
 
-        if ($selectorType === 'role' && $this->hasSnapshotRole($step, $organization, $actor)) {
-            return;
+        if ($selectorType === 'role' && $this->hasSnapshotRole($step, $organization, $actor, $academicUnit)) {
+            $isEligible = true;
         }
 
-        throw new DomainException('The actor is not eligible for the active approval step.');
+        if (! $isEligible) {
+            throw new DomainException('The actor is not eligible for the active approval step.');
+        }
+
+        if ($requiresDistinctApprovers && DB::table('approval_actions')
+            ->join('approval_instance_steps', 'approval_instance_steps.id', '=', 'approval_actions.approval_instance_step_id')
+            ->where('approval_actions.organization_id', $organization->id)
+            ->where('approval_instance_steps.organization_id', $organization->id)
+            ->where('approval_instance_steps.approval_instance_id', $instance->id)
+            ->where('approval_actions.actor_user_id', $actor->id)
+            ->where('approval_actions.approval_instance_step_id', '!=', $step->id)
+            ->exists()) {
+            throw new DomainException('This workflow requires distinct approvers for each step.');
+        }
     }
 
-    private function hasSnapshotRole(ApprovalInstanceStepRow $step, Organization $organization, User $actor): bool
-    {
+    private function hasSnapshotRole(
+        ApprovalInstanceStepRow $step,
+        Organization $organization,
+        User $actor,
+        ?AcademicUnit $academicUnit,
+    ): bool {
         if ($step->approverRoleCodes === []) {
             return false;
         }
 
-        return DB::table('membership_role_assignments')
+        $query = DB::table('membership_role_assignments')
             ->join('organization_members', 'organization_members.id', '=', 'membership_role_assignments.membership_id')
             ->join('roles', 'roles.id', '=', 'membership_role_assignments.role_id')
             ->where('membership_role_assignments.organization_id', $organization->id)
             ->where('organization_members.user_id', $actor->id)
             ->where('organization_members.organization_id', $organization->id)
             ->where('roles.organization_id', $organization->id)
-            ->whereIn('roles.code', $step->approverRoleCodes)
+            ->whereIn('roles.code', $step->approverRoleCodes);
+
+        if ($academicUnit === null) {
+            return $query
+                ->whereNull('membership_role_assignments.academic_unit_id')
+                ->exists();
+        }
+
+        $scopedUnitIds = AcademicUnitClosure::query()
+            ->where('organization_id', $organization->id)
+            ->where('descendant_id', $academicUnit->id)
+            ->pluck('ancestor_id')
+            ->push($academicUnit->id)
+            ->unique()
+            ->values()
+            ->all();
+
+        return $query
+            ->where(function (Builder $query) use ($scopedUnitIds): void {
+                $query
+                    ->whereNull('membership_role_assignments.academic_unit_id')
+                    ->orWhereIn('membership_role_assignments.academic_unit_id', $scopedUnitIds);
+            })
             ->exists();
     }
 

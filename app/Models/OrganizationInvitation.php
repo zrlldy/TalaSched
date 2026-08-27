@@ -58,7 +58,7 @@ class OrganizationInvitation extends Model
                 $invitation->token_hash = static::hashToken($invitation->plainTextToken);
             }
 
-            if (empty($invitation->email_normalized) && is_string($invitation->email)) {
+            if (empty($invitation->email_normalized)) {
                 $invitation->email_normalized = static::normalizeEmail($invitation->email);
             }
         });

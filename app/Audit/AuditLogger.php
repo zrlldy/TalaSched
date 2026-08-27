@@ -32,8 +32,8 @@ class AuditLogger
             'subject_id' => $this->subjectIdentifier($subject),
             'before' => $before === null ? null : json_encode($before, JSON_THROW_ON_ERROR),
             'after' => $after === null ? null : json_encode($after, JSON_THROW_ON_ERROR),
-            'ip_address' => request()?->ip(),
-            'user_agent' => request()?->userAgent(),
+            'ip_address' => request()->ip(),
+            'user_agent' => request()->userAgent(),
             'occurred_at' => now(),
         ]);
     }

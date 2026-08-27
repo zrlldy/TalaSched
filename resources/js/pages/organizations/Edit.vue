@@ -327,11 +327,9 @@ const confirmCancelInvitation = (invitation: OrganizationInvitation) => {
                 description="Permanently delete your organization"
             />
             <div
-                class="space-y-4 rounded-lg border border-red-100 bg-red-50 p-4 dark:border-red-200/10 dark:bg-red-700/10"
+                class="space-y-4 rounded-lg border border-conflict/25 bg-conflict/10 p-4"
             >
-                <div
-                    class="relative space-y-0.5 text-red-600 dark:text-red-100"
-                >
+                <div class="relative space-y-0.5 text-conflict">
                     <p class="font-medium">Warning</p>
                     <p class="text-sm">
                         Please proceed with caution, this cannot be undone.

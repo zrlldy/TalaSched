@@ -92,7 +92,7 @@ test('concurrent child creation preserves hierarchy closure rows', function (): 
     try {
         $deadline = microtime(true) + 10;
 
-        while (collect($readyPaths)->filter('file_exists')->count() < count($readyPaths)) {
+        while (collect($readyPaths)->filter(fn (string $path): bool => file_exists($path))->count() < count($readyPaths)) {
             if (microtime(true) > $deadline) {
                 throw new RuntimeException('Concurrency workers did not reach the barrier.');
             }
@@ -114,14 +114,16 @@ test('concurrent child creation preserves hierarchy closure rows', function (): 
             expect($result['ok'])->toBeTrue();
         }
 
-        $closureRows = DB::table('academic_unit_closure')
-            ->where('organization_id', $organization->getKey())
-            ->where('ancestor_id', $root->getKey())
-            ->get();
+        $tenantContext->run($organization, function () use ($organization, $root): void {
+            $closureRows = DB::table('academic_unit_closure')
+                ->where('organization_id', $organization->getKey())
+                ->where('ancestor_id', $root->getKey())
+                ->get();
 
-        expect($closureRows)->toHaveCount(3)
-            ->and($closureRows->pluck('descendant_id')->unique())->toHaveCount(3)
-            ->and(DB::table('academic_units')->where('organization_id', $organization->getKey())->count())->toBe(3);
+            expect($closureRows)->toHaveCount(3)
+                ->and($closureRows->pluck('descendant_id')->unique())->toHaveCount(3)
+                ->and(DB::table('academic_units')->where('organization_id', $organization->getKey())->count())->toBe(3);
+        });
     } finally {
         foreach (array_merge([$barrierPath], $readyPaths, $resultPaths) as $path) {
             if (file_exists($path)) {

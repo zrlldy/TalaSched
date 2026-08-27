@@ -15,7 +15,9 @@ use App\Models\User;
 use App\Scheduling\CloneTimetableVersion;
 use App\Scheduling\PublishTimetableVersion;
 use App\Scheduling\RollbackTimetableVersion;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Testing\Fluent\AssertableJson;
 
 beforeEach(function () {
     $this->user = User::factory()->withOwnedOrganization()->create();
@@ -61,6 +63,108 @@ test('a timetable version is cloned as a new editable snapshot', function () {
     expect($clone->version_number)->toBe(2)
         ->and($clone->based_on_version_id)->toBe($source->id)
         ->and($clone->status)->toBe(TimetableVersionStatus::Draft);
+});
+
+test('version management routes expose clone publish and rollback transitions', function () {
+    $source = TimetableVersion::create([
+        'organization_id' => $this->organization->id,
+        'timetable_id' => $this->timetable->id,
+        'version_number' => 1,
+        'status' => TimetableVersionStatus::Published,
+        'created_by' => $this->user->id,
+    ]);
+
+    $cloneResponse = $this->actingAs($this->user)->postJson(route(
+        'scheduling.timetables.versions.clone',
+        [$this->organization, $this->timetable, $source],
+    ));
+    $cloneResponse->assertSuccessful()
+        ->assertJson(fn (AssertableJson $json): AssertableJson => $json
+            ->where('data.type', 'timetable_version')
+            ->where('data.attributes.status', TimetableVersionStatus::Draft->value)
+            ->etc());
+    $clone = TimetableVersion::query()->where('status', TimetableVersionStatus::Draft)->firstOrFail();
+
+    $approved = TimetableVersion::create([
+        'organization_id' => $this->organization->id,
+        'timetable_id' => $this->timetable->id,
+        'version_number' => 3,
+        'status' => TimetableVersionStatus::Approved,
+        'created_by' => $this->user->id,
+    ]);
+    $publishResponse = $this->actingAs($this->user)->postJson(route(
+        'scheduling.timetables.versions.publish',
+        [$this->organization, $this->timetable, $approved],
+    ));
+    $publishResponse->assertSuccessful()
+        ->assertJsonPath('data.attributes.status', TimetableVersionStatus::Published->value);
+
+    $rollbackResponse = $this->actingAs($this->user)->postJson(route(
+        'scheduling.timetables.versions.rollback',
+        [$this->organization, $this->timetable, $approved],
+    ));
+    $rollbackResponse->assertSuccessful()
+        ->assertJsonPath('data.attributes.status', TimetableVersionStatus::Draft->value)
+        ->assertJsonPath('data.attributes.number', 4);
+
+    expect($source->fresh()->status)->toBe(TimetableVersionStatus::Superseded)
+        ->and($clone->fresh()->status)->toBe(TimetableVersionStatus::Draft);
+});
+
+test('version submit route accepts an organization public workflow identifier', function () {
+    grantApprovalWorkflowsEntitlement($this->organization);
+    $workflowPublicId = (string) Str::uuid();
+    $timestamp = now();
+    $workflowId = DB::table('approval_workflows')->insertGetId([
+        'organization_id' => $this->organization->id,
+        'public_id' => $workflowPublicId,
+        'name' => 'Version review',
+        'is_active' => true,
+        'created_at' => $timestamp,
+        'updated_at' => $timestamp,
+    ]);
+    $workflowVersionId = DB::table('approval_workflow_versions')->insertGetId([
+        'organization_id' => $this->organization->id,
+        'approval_workflow_id' => $workflowId,
+        'version_number' => 1,
+        'activated_at' => $timestamp,
+        'created_at' => $timestamp,
+        'updated_at' => $timestamp,
+    ]);
+    DB::table('approval_workflow_steps')->insert([
+        'organization_id' => $this->organization->id,
+        'approval_workflow_version_id' => $workflowVersionId,
+        'sequence' => 1,
+        'label' => 'Scheduling review',
+        'approver_selector_type' => 'permission',
+        'required_permission' => 'manage_scheduling',
+        'minimum_approvals' => 1,
+        'allow_self_approval' => false,
+        'signatory_slot' => 'registrar',
+        'created_at' => $timestamp,
+        'updated_at' => $timestamp,
+    ]);
+    $version = TimetableVersion::create([
+        'organization_id' => $this->organization->id,
+        'timetable_id' => $this->timetable->id,
+        'version_number' => 1,
+        'status' => TimetableVersionStatus::Draft,
+        'created_by' => $this->user->id,
+    ]);
+
+    $response = $this->actingAs($this->user)->postJson(route(
+        'scheduling.timetables.versions.submit',
+        [$this->organization, $this->timetable, $version],
+    ), [
+        'workflow_id' => $workflowPublicId,
+    ]);
+
+    $response->assertSuccessful()
+        ->assertJsonPath('data.type', 'timetable_version_submitted')
+        ->assertJsonPath('data.attributes.id', $version->public_id)
+        ->assertJsonPath('data.attributes.status', TimetableVersionStatus::InReview->value);
+
+    expect(DB::table('approval_instances')->where('timetable_version_id', $version->id)->count())->toBe(1);
 });
 
 test('a timetable version clone copies dated exceptions and replacement resources', function () {

@@ -234,7 +234,7 @@ defineOptions({
 
     <div class="flex min-w-0 flex-col gap-8 pb-8">
         <header
-            class="relative overflow-hidden rounded-2xl border border-border/70 bg-slate-950 px-4 py-6 text-white shadow-sm sm:px-6 sm:py-8"
+            class="relative overflow-hidden rounded-lg border border-sidebar-border bg-sidebar px-4 py-6 text-sidebar-foreground sm:px-6 sm:py-8"
         >
             <div
                 class="pointer-events-none absolute -top-20 -right-12 h-64 w-64 rounded-full border-[24px] border-amber-300/20"
@@ -244,7 +244,7 @@ defineOptions({
             >
                 <div class="max-w-2xl space-y-3">
                     <p
-                        class="font-mono text-[11px] font-semibold tracking-[0.24em] text-amber-300 uppercase"
+                        class="font-mono text-[11px] font-semibold tracking-[0.2em] text-sidebar-primary uppercase"
                     >
                         Academic / Setup
                     </p>
@@ -253,7 +253,9 @@ defineOptions({
                     >
                         Build the year, then the rhythm.
                     </h1>
-                    <p class="max-w-xl text-sm leading-6 text-slate-300">
+                    <p
+                        class="max-w-xl text-sm leading-6 text-sidebar-foreground/70"
+                    >
                         Set the dates people recognize, add the periods that
                         shape the week, then activate the calendar when it is
                         ready.
@@ -263,37 +265,37 @@ defineOptions({
                     class="grid w-full max-w-full grid-cols-3 gap-2 text-center md:w-auto md:min-w-72"
                 >
                     <div
-                        class="rounded-xl border border-white/10 bg-white/5 px-3 py-3"
+                        class="rounded-md border border-sidebar-border bg-sidebar-accent/50 px-3 py-3"
                     >
                         <p class="text-2xl font-semibold">
                             {{ summary.years }}
                         </p>
                         <p
-                            class="font-mono text-[10px] tracking-wider text-slate-400 uppercase"
+                            class="font-mono text-[10px] tracking-wider text-sidebar-foreground/55 uppercase"
                         >
                             Years
                         </p>
                     </div>
                     <div
-                        class="rounded-xl border border-white/10 bg-white/5 px-3 py-3"
+                        class="rounded-md border border-sidebar-border bg-sidebar-accent/50 px-3 py-3"
                     >
                         <p class="text-2xl font-semibold">
                             {{ summary.unit_types }}
                         </p>
                         <p
-                            class="font-mono text-[10px] tracking-wider text-slate-400 uppercase"
+                            class="font-mono text-[10px] tracking-wider text-sidebar-foreground/55 uppercase"
                         >
                             Types
                         </p>
                     </div>
                     <div
-                        class="rounded-xl border border-white/10 bg-white/5 px-3 py-3"
+                        class="rounded-md border border-sidebar-border bg-sidebar-accent/50 px-3 py-3"
                     >
                         <p class="text-2xl font-semibold">
                             {{ summary.units }}
                         </p>
                         <p
-                            class="font-mono text-[10px] tracking-wider text-slate-400 uppercase"
+                            class="font-mono text-[10px] tracking-wider text-sidebar-foreground/55 uppercase"
                         >
                             Units
                         </p>
@@ -328,7 +330,7 @@ defineOptions({
 
                 <div
                     v-if="years.length === 0"
-                    class="rounded-2xl border border-dashed border-border bg-muted/40 px-6 py-12 text-center"
+                    class="rounded-lg border border-dashed border-border bg-muted/40 px-6 py-12 text-center"
                 >
                     <CalendarDays class="mx-auto mb-4 h-9 w-9 text-amber-500" />
                     <h2 class="text-lg font-semibold">No academic year yet</h2>
@@ -344,7 +346,7 @@ defineOptions({
                 <article
                     v-for="year in years"
                     :key="year.id"
-                    class="min-w-0 overflow-hidden rounded-2xl border border-border/70 bg-card"
+                    class="min-w-0 overflow-hidden rounded-lg border border-border/70 bg-card"
                 >
                     <div
                         class="flex flex-col gap-4 border-b border-border/70 px-5 py-5 sm:flex-row sm:items-start sm:justify-between"
@@ -402,7 +404,7 @@ defineOptions({
                     <div class="min-w-0 space-y-4 px-5 py-5">
                         <div
                             v-if="year.periods.length === 0"
-                            class="rounded-xl bg-muted/50 px-4 py-4 text-sm leading-5 text-muted-foreground"
+                            class="rounded-lg bg-muted/50 px-4 py-4 text-sm leading-5 text-muted-foreground"
                         >
                             Add the first period to make this year activatable.
                         </div>
@@ -410,7 +412,7 @@ defineOptions({
                             <div
                                 v-for="period in year.periods"
                                 :key="period.id"
-                                class="relative min-w-0 rounded-xl border border-border/70 p-4"
+                                class="relative min-w-0 rounded-lg border border-border/70 p-4"
                             >
                                 <div
                                     class="mb-3 flex items-center justify-between gap-3"
@@ -684,7 +686,7 @@ defineOptions({
                             v-bind="
                                 storePeriod.form([organizationSlug, year.id])
                             "
-                            class="grid gap-3 rounded-xl border border-dashed border-border p-4 md:grid-cols-2"
+                            class="grid gap-3 rounded-lg border border-dashed border-border p-4 md:grid-cols-2"
                             #default="{ errors, processing }"
                         >
                             <div
@@ -786,7 +788,7 @@ defineOptions({
             >
                 <section
                     v-if="canManageAcademic"
-                    class="rounded-2xl border border-amber-500/25 bg-amber-500/[0.06] p-5 dark:bg-amber-500/[0.08]"
+                    class="rounded-lg border border-amber-500/25 bg-amber-500/[0.06] p-5 dark:bg-amber-500/[0.08]"
                 >
                     <div class="mb-5 flex items-start justify-between gap-4">
                         <div>
@@ -856,7 +858,7 @@ defineOptions({
 
                 <section
                     v-if="canManageAcademic"
-                    class="rounded-2xl border border-border/70 bg-card p-5"
+                    class="rounded-lg border border-border/70 bg-card p-5"
                 >
                     <div class="mb-4 flex items-start gap-3">
                         <div
@@ -901,9 +903,7 @@ defineOptions({
                     </div>
                 </section>
 
-                <section
-                    class="rounded-2xl border border-border/70 bg-card p-5"
-                >
+                <section class="rounded-lg border border-border/70 bg-card p-5">
                     <div class="mb-4 flex items-center justify-between gap-3">
                         <div>
                             <h2 class="font-semibold">Structure at a glance</h2>
@@ -939,7 +939,7 @@ defineOptions({
 
         <section
             id="academic-structure"
-            class="scroll-mt-6 rounded-2xl border border-border/70 bg-card"
+            class="scroll-mt-6 rounded-lg border border-border/70 bg-card"
         >
             <div
                 class="flex flex-col gap-4 border-b border-border/70 px-5 py-5 sm:flex-row sm:items-end sm:justify-between"
@@ -962,7 +962,7 @@ defineOptions({
                     <div
                         v-for="unit in units"
                         :key="unit.id"
-                        class="flex min-w-0 flex-col gap-3 overflow-hidden rounded-xl border border-border/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                        class="flex min-w-0 flex-col gap-3 overflow-hidden rounded-lg border border-border/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
                         :style="{ marginLeft: `${unitDepth(unit) * 1.25}rem` }"
                     >
                         <div class="min-w-0">
@@ -1046,7 +1046,7 @@ defineOptions({
                 </div>
                 <div
                     v-else
-                    class="rounded-xl border border-dashed border-border px-5 py-10 text-center"
+                    class="rounded-lg border border-dashed border-border px-5 py-10 text-center"
                 >
                     <Layers3 class="mx-auto mb-3 h-8 w-8 text-amber-500" />
                     <p class="text-sm leading-5 text-muted-foreground">
@@ -1057,7 +1057,7 @@ defineOptions({
                 <Form
                     v-if="canManageAcademic"
                     v-bind="storeUnit.form(organizationSlug)"
-                    class="grid gap-3 rounded-xl border border-amber-500/25 bg-amber-500/[0.06] p-4 dark:bg-amber-500/[0.08]"
+                    class="grid gap-3 rounded-lg border border-amber-500/25 bg-amber-500/[0.06] p-4 dark:bg-amber-500/[0.08]"
                     #default="{ errors, processing }"
                 >
                     <div class="flex items-center gap-2 text-sm font-medium">
@@ -1130,7 +1130,7 @@ defineOptions({
 
         <section
             id="student-groups"
-            class="scroll-mt-6 rounded-2xl border border-border/70 bg-card"
+            class="scroll-mt-6 rounded-lg border border-border/70 bg-card"
         >
             <div
                 class="flex flex-col gap-3 border-b border-border/70 px-5 py-5 sm:flex-row sm:items-end sm:justify-between"
@@ -1150,7 +1150,7 @@ defineOptions({
                 <article
                     v-for="group in groups"
                     :key="group.id"
-                    class="min-w-0 rounded-xl border border-border/70 p-4"
+                    class="min-w-0 rounded-lg border border-border/70 p-4"
                 >
                     <div class="flex items-start justify-between gap-3">
                         <div class="min-w-0">

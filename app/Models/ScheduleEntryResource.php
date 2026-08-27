@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 /**
  * @property int $scheduling_resource_id
  * @property ScheduleResourceRole $role
+ * @property-read SchedulingResource $resource
  */
 #[Fillable(['organization_id', 'schedule_entry_id', 'scheduling_resource_id', 'role'])]
 class ScheduleEntryResource extends Model

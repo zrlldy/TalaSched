@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Carbon;
@@ -33,6 +34,7 @@ use Laravel\Fortify\TwoFactorAuthenticatable;
  * @property-read Collection<int, Organization> $ownedOrganizations
  * @property-read Collection<int, Membership> $organizationMemberships
  * @property-read Collection<int, Organization> $organizations
+ * @property-read Collection<int, SignatoryProfile> $signatoryProfiles
  */
 #[Fillable(['name', 'email', 'password', 'current_organization_id'])]
 #[Hidden(['password', 'current_organization_id', 'two_factor_secret', 'two_factor_recovery_codes', 'remember_token'])]
@@ -40,6 +42,16 @@ class User extends Authenticatable implements PasskeyUser
 {
     /** @use HasFactory<UserFactory> */
     use HasFactory, HasOrganizations, Notifiable, PasskeyAuthenticatable, TwoFactorAuthenticatable;
+
+    /**
+     * Get signatory profiles owned by this user.
+     *
+     * @return HasMany<SignatoryProfile, $this>
+     */
+    public function signatoryProfiles(): HasMany
+    {
+        return $this->hasMany(SignatoryProfile::class);
+    }
 
     /**
      * Get the attributes that should be cast.

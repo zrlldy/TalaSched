@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import { Link, usePage } from '@inertiajs/vue3';
-import { CalendarRange, LayoutGrid, PanelsTopLeft } from '@lucide/vue';
+import {
+    CalendarClock,
+    CalendarRange,
+    ClipboardCheck,
+    LayoutGrid,
+    PanelsTopLeft,
+} from '@lucide/vue';
 import { computed } from 'vue';
 import AppLogo from '@/components/AppLogo.vue';
 import NavMain from '@/components/NavMain.vue';
@@ -17,8 +23,10 @@ import {
 } from '@/components/ui/sidebar';
 import { dashboard } from '@/routes';
 import { setup as academicSetup } from '@/routes/academic';
+import { inbox as approvalInbox } from '@/routes/approvals';
 import { index as organizations } from '@/routes/organizations';
 import { setup as resourceSetup } from '@/routes/resources';
+import { show as timetableShow } from '@/routes/scheduling/timetables';
 import type { NavItem } from '@/types';
 
 const page = usePage();
@@ -28,6 +36,16 @@ const dashboardUrl = computed(() =>
         ? dashboard(page.props.currentOrganization.slug).url
         : organizations().url,
 );
+const timetableUrl = computed(() => {
+    const timetableId = page.props.timetableId;
+
+    if (!page.props.currentOrganization || typeof timetableId !== 'string') {
+        return null;
+    }
+
+    return timetableShow([page.props.currentOrganization.slug, timetableId])
+        .url;
+});
 
 const mainNavItems = computed<NavItem[]>(() => {
     const items: NavItem[] = [
@@ -39,6 +57,14 @@ const mainNavItems = computed<NavItem[]>(() => {
     ];
 
     if (page.props.currentOrganization) {
+        if (timetableUrl.value !== null) {
+            items.push({
+                title: 'Timetable',
+                href: timetableUrl.value,
+                icon: CalendarClock,
+            });
+        }
+
         items.push({
             title: 'Academic setup',
             href: academicSetup(page.props.currentOrganization.slug).url,
@@ -48,6 +74,11 @@ const mainNavItems = computed<NavItem[]>(() => {
             title: 'Resources & catalog',
             href: resourceSetup(page.props.currentOrganization.slug).url,
             icon: PanelsTopLeft,
+        });
+        items.push({
+            title: 'Approvals',
+            href: approvalInbox(page.props.currentOrganization.slug).url,
+            icon: ClipboardCheck,
         });
     }
 

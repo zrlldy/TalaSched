@@ -5,6 +5,7 @@ namespace Database\Factories;
 use App\Models\IdempotencyRecord;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
+use LogicException;
 
 /**
  * @extends Factory<IdempotencyRecord>
@@ -20,7 +21,18 @@ class IdempotencyRecordFactory extends Factory
     {
         return [
             'actor_user_id' => User::factory()->withOwnedOrganization(),
-            'organization_id' => fn (array $attributes): int => User::findOrFail($attributes['actor_user_id'])->current_organization_id,
+            'organization_id' => function (array $attributes): int {
+                $organizationId = User::query()
+                    ->whereKey((int) $attributes['actor_user_id'])
+                    ->firstOrFail()
+                    ->current_organization_id;
+
+                if ($organizationId === null) {
+                    throw new LogicException('Idempotency records require an actor with a current organization.');
+                }
+
+                return $organizationId;
+            },
             'route' => 'scheduling.entries.store',
             'key_hash' => hash('sha256', fake()->uuid()),
             'request_hash' => hash('sha256', fake()->uuid()),

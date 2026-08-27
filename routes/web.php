@@ -1,12 +1,14 @@
 <?php
 
 use App\Http\Controllers\AcademicSetupController;
+use App\Http\Controllers\Approvals\ApprovalController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\Organizations\OrganizationInvitationController;
 use App\Http\Controllers\ResourceSetupController;
 use App\Http\Controllers\Scheduling\ScheduleEntryController;
 use App\Http\Controllers\Scheduling\ScheduleExceptionController;
 use App\Http\Controllers\Scheduling\TimetableVersionComparisonController;
+use App\Http\Controllers\Scheduling\TimetableVersionController;
 use App\Http\Controllers\Scheduling\TimetableViewController;
 use App\Http\Controllers\Scheduling\TimetableWorkspaceController;
 use App\Http\Middleware\EnsureOrganizationMembership;
@@ -52,6 +54,19 @@ Route::prefix('{current_organization}')
         Route::get('scheduling/timetables/{timetable}', [TimetableWorkspaceController::class, 'show'])->name('scheduling.timetables.show');
         Route::get('scheduling/timetables/{timetable}/views', [TimetableViewController::class, 'show'])->name('scheduling.timetables.views');
         Route::get('scheduling/timetables/{timetable}/versions/compare', [TimetableVersionComparisonController::class, 'show'])->name('scheduling.timetables.versions.compare');
+        Route::post('scheduling/timetables/{timetable}/versions/{timetable_version}/clone', [TimetableVersionController::class, 'cloneVersion'])->name('scheduling.timetables.versions.clone');
+        Route::post('scheduling/timetables/{timetable}/versions/{timetable_version}/submit', [TimetableVersionController::class, 'submitVersion'])->name('scheduling.timetables.versions.submit');
+        Route::post('scheduling/timetables/{timetable}/versions/{timetable_version}/publish', [TimetableVersionController::class, 'publishVersion'])->name('scheduling.timetables.versions.publish');
+        Route::post('scheduling/timetables/{timetable}/versions/{timetable_version}/rollback', [TimetableVersionController::class, 'rollbackVersion'])->name('scheduling.timetables.versions.rollback');
+        Route::get('approvals', [ApprovalController::class, 'inbox'])->name('approvals.inbox');
+        Route::post('approvals/{timetable_version}/decide', [ApprovalController::class, 'decide'])->name('approvals.decide');
+        Route::get('approvals/workflows', [ApprovalController::class, 'workflows'])->name('approvals.workflows');
+        Route::post('approvals/workflows', [ApprovalController::class, 'storeWorkflow'])->name('approvals.workflows.store');
+        Route::post('approvals/workflows/{workflow}/versions/{version}/activate', [ApprovalController::class, 'activateWorkflow'])->name('approvals.workflows.versions.activate');
+        Route::post('approvals/workflows/{workflow}/retire', [ApprovalController::class, 'retireWorkflow'])->name('approvals.workflows.retire');
+        Route::get('approvals/signatories', [ApprovalController::class, 'signatories'])->name('approvals.signatories');
+        Route::post('approvals/signatories', [ApprovalController::class, 'storeSignatory'])->name('approvals.signatories.store');
+        Route::post('approvals/signatories/{signatory_profile}', [ApprovalController::class, 'updateSignatory'])->name('approvals.signatories.update');
     });
 
 Route::middleware(['auth'])->group(function () {

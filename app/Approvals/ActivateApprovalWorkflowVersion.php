@@ -105,6 +105,7 @@ class ActivateApprovalWorkflowVersion
             $steps[] = [
                 'sequence' => (int) $step->sequence,
                 'label' => (string) $step->label,
+                'academic_unit_id' => $step->academic_unit_id === null ? null : (int) $step->academic_unit_id,
                 'approver_selector_type' => (string) $step->approver_selector_type,
                 'required_permission' => is_string($step->required_permission) ? $step->required_permission : null,
                 'role_codes' => $normalizedRoleCodes,

@@ -28,6 +28,7 @@ use LogicException;
  * @property-read Collection<int, OrganizationInvitation> $invitations
  * @property-read Collection<int, Membership> $memberships
  * @property-read Collection<int, User> $members
+ * @property-read Collection<int, SignatoryProfile> $signatoryProfiles
  */
 #[Fillable(['name', 'slug', 'owner_user_id', 'timezone', 'locale', 'scheduling_granularity', 'status'])]
 class Organization extends Model
@@ -120,6 +121,16 @@ class Organization extends Model
     public function invitations(): HasMany
     {
         return $this->hasMany(OrganizationInvitation::class);
+    }
+
+    /**
+     * Get signatory profiles configured for this organization.
+     *
+     * @return HasMany<SignatoryProfile, $this>
+     */
+    public function signatoryProfiles(): HasMany
+    {
+        return $this->hasMany(SignatoryProfile::class);
     }
 
     /**

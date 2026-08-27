@@ -21,7 +21,10 @@ class AcademicUnitFactory extends Factory
     {
         return [
             'academic_unit_type_id' => AcademicUnitType::factory(),
-            'organization_id' => fn (array $attributes): int => AcademicUnitType::findOrFail($attributes['academic_unit_type_id'])->organization_id,
+            'organization_id' => fn (array $attributes): int => AcademicUnitType::query()
+                ->whereKey((int) $attributes['academic_unit_type_id'])
+                ->firstOrFail()
+                ->organization_id,
             'parent_id' => null,
             'code' => fake()->unique()->bothify('UNIT-####'),
             'name' => fake()->company(),

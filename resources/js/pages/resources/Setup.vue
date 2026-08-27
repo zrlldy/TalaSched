@@ -188,7 +188,7 @@ defineOptions({
 
     <div class="flex min-w-0 flex-col gap-8 pb-8">
         <header
-            class="relative overflow-hidden rounded-2xl border border-border/70 bg-[#13211f] px-4 py-6 text-white shadow-sm sm:px-6 sm:py-8"
+            class="relative overflow-hidden rounded-lg border border-sidebar-border bg-sidebar px-4 py-6 text-sidebar-foreground sm:px-6 sm:py-8"
         >
             <div
                 class="pointer-events-none absolute -top-24 -right-16 h-72 w-72 rounded-full border-[28px] border-lime-300/15"
@@ -198,7 +198,7 @@ defineOptions({
             >
                 <div class="max-w-2xl space-y-3">
                     <p
-                        class="font-mono text-[11px] font-semibold tracking-[0.24em] text-lime-300 uppercase"
+                        class="font-mono text-[11px] font-semibold tracking-[0.2em] text-sidebar-primary uppercase"
                     >
                         Resources / Catalog
                     </p>
@@ -207,7 +207,9 @@ defineOptions({
                     >
                         Prepare the pieces that make a timetable real.
                     </h1>
-                    <p class="max-w-xl text-sm leading-6 text-slate-300">
+                    <p
+                        class="max-w-xl text-sm leading-6 text-sidebar-foreground/70"
+                    >
                         Add the people, places, and courses that a scheduler can
                         actually place on the week.
                     </p>
@@ -216,47 +218,47 @@ defineOptions({
                     class="grid w-full max-w-full grid-cols-2 gap-2 text-center sm:grid-cols-4 lg:w-auto lg:min-w-[22rem]"
                 >
                     <div
-                        class="rounded-xl border border-white/10 bg-white/5 px-3 py-3"
+                        class="rounded-md border border-sidebar-border bg-sidebar-accent/50 px-3 py-3"
                     >
                         <p class="text-2xl font-semibold">
                             {{ faculty.length }}
                         </p>
                         <p
-                            class="font-mono text-[10px] tracking-wider text-slate-400 uppercase"
+                            class="font-mono text-[10px] tracking-wider text-sidebar-foreground/55 uppercase"
                         >
                             Faculty
                         </p>
                     </div>
                     <div
-                        class="rounded-xl border border-white/10 bg-white/5 px-3 py-3"
+                        class="rounded-md border border-sidebar-border bg-sidebar-accent/50 px-3 py-3"
                     >
                         <p class="text-2xl font-semibold">{{ rooms.length }}</p>
                         <p
-                            class="font-mono text-[10px] tracking-wider text-slate-400 uppercase"
+                            class="font-mono text-[10px] tracking-wider text-sidebar-foreground/55 uppercase"
                         >
                             Rooms
                         </p>
                     </div>
                     <div
-                        class="rounded-xl border border-white/10 bg-white/5 px-3 py-3"
+                        class="rounded-md border border-sidebar-border bg-sidebar-accent/50 px-3 py-3"
                     >
                         <p class="text-2xl font-semibold">
                             {{ subjects.length }}
                         </p>
                         <p
-                            class="font-mono text-[10px] tracking-wider text-slate-400 uppercase"
+                            class="font-mono text-[10px] tracking-wider text-sidebar-foreground/55 uppercase"
                         >
                             Subjects
                         </p>
                     </div>
                     <div
-                        class="rounded-xl border border-white/10 bg-white/5 px-3 py-3"
+                        class="rounded-md border border-sidebar-border bg-sidebar-accent/50 px-3 py-3"
                     >
                         <p class="text-2xl font-semibold">
                             {{ offerings.length }}
                         </p>
                         <p
-                            class="font-mono text-[10px] tracking-wider text-slate-400 uppercase"
+                            class="font-mono text-[10px] tracking-wider text-sidebar-foreground/55 uppercase"
                         >
                             Offerings
                         </p>
@@ -268,9 +270,7 @@ defineOptions({
         <SetupRail :steps="resourceSetupSteps" />
 
         <section class="grid min-w-0 gap-4 md:grid-cols-3">
-            <div
-                class="min-w-0 rounded-2xl border border-border/70 bg-card p-5"
-            >
+            <div class="min-w-0 rounded-lg border border-border/70 bg-card p-5">
                 <Users class="mb-4 h-5 w-5 text-lime-600" />
                 <p
                     class="font-mono text-[11px] tracking-wider text-muted-foreground uppercase"
@@ -285,9 +285,7 @@ defineOptions({
                     conflicts.
                 </p>
             </div>
-            <div
-                class="min-w-0 rounded-2xl border border-border/70 bg-card p-5"
-            >
+            <div class="min-w-0 rounded-lg border border-border/70 bg-card p-5">
                 <Layers3 class="mb-4 h-5 w-5 text-amber-600" />
                 <p
                     class="font-mono text-[11px] tracking-wider text-muted-foreground uppercase"
@@ -302,9 +300,7 @@ defineOptions({
                     period offering.
                 </p>
             </div>
-            <div
-                class="min-w-0 rounded-2xl border border-border/70 bg-card p-5"
-            >
+            <div class="min-w-0 rounded-lg border border-border/70 bg-card p-5">
                 <Clock3 class="mb-4 h-5 w-5 text-sky-600" />
                 <p
                     class="font-mono text-[11px] tracking-wider text-muted-foreground uppercase"
@@ -340,7 +336,7 @@ defineOptions({
 
             <div class="grid min-w-0 gap-5 xl:grid-cols-2">
                 <article
-                    class="min-w-0 rounded-2xl border border-border/70 bg-card p-5"
+                    class="min-w-0 rounded-lg border border-border/70 bg-card p-5"
                 >
                     <div class="mb-5 flex items-start gap-3">
                         <div
@@ -471,7 +467,7 @@ defineOptions({
                 </article>
 
                 <article
-                    class="min-w-0 rounded-2xl border border-border/70 bg-card p-5"
+                    class="min-w-0 rounded-lg border border-border/70 bg-card p-5"
                 >
                     <div class="mb-5 flex items-start gap-3">
                         <div
@@ -596,7 +592,7 @@ defineOptions({
 
             <div class="grid min-w-0 gap-5 lg:grid-cols-3">
                 <article
-                    class="min-w-0 rounded-2xl border border-border/70 bg-card p-5"
+                    class="min-w-0 rounded-lg border border-border/70 bg-card p-5"
                 >
                     <div class="mb-4 flex items-center gap-3">
                         <School class="h-4 w-4 text-sky-600" />
@@ -631,7 +627,7 @@ defineOptions({
                     </Form>
                 </article>
                 <article
-                    class="min-w-0 rounded-2xl border border-border/70 bg-card p-5"
+                    class="min-w-0 rounded-lg border border-border/70 bg-card p-5"
                 >
                     <div class="mb-4 flex items-center gap-3">
                         <FlaskConical class="h-4 w-4 text-amber-600" />
@@ -666,7 +662,7 @@ defineOptions({
                     </Form>
                 </article>
                 <article
-                    class="min-w-0 rounded-2xl border border-border/70 bg-card p-5"
+                    class="min-w-0 rounded-lg border border-border/70 bg-card p-5"
                 >
                     <div class="mb-4 flex items-center gap-3">
                         <Building2 class="h-4 w-4 text-lime-600" />
@@ -723,7 +719,7 @@ defineOptions({
                 class="grid min-w-0 gap-5 lg:grid-cols-2"
             >
                 <article
-                    class="min-w-0 rounded-2xl border border-border/70 bg-card"
+                    class="min-w-0 rounded-lg border border-border/70 bg-card"
                 >
                     <div class="border-b border-border/70 px-5 py-4">
                         <h2 class="font-semibold">Faculty ledger</h2>
@@ -781,7 +777,7 @@ defineOptions({
                     </div>
                 </article>
                 <article
-                    class="min-w-0 rounded-2xl border border-border/70 bg-card"
+                    class="min-w-0 rounded-lg border border-border/70 bg-card"
                 >
                     <div class="border-b border-border/70 px-5 py-4">
                         <h2 class="font-semibold">Room ledger</h2>
@@ -841,7 +837,7 @@ defineOptions({
             </div>
             <div class="grid min-w-0 gap-5 xl:grid-cols-2">
                 <article
-                    class="min-w-0 rounded-2xl border border-border/70 bg-card p-5"
+                    class="min-w-0 rounded-lg border border-border/70 bg-card p-5"
                 >
                     <div class="mb-5 flex items-start gap-3">
                         <div
@@ -912,7 +908,7 @@ defineOptions({
                     </Form>
                 </article>
                 <article
-                    class="min-w-0 rounded-2xl border border-border/70 bg-card p-5"
+                    class="min-w-0 rounded-lg border border-border/70 bg-card p-5"
                 >
                     <div class="mb-5 flex items-start gap-3">
                         <div
@@ -1094,7 +1090,7 @@ defineOptions({
                 class="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]"
             >
                 <article
-                    class="min-w-0 rounded-2xl border border-border/70 bg-card p-5"
+                    class="min-w-0 rounded-lg border border-border/70 bg-card p-5"
                 >
                     <div class="mb-5 flex items-start gap-3">
                         <div
@@ -1223,7 +1219,7 @@ defineOptions({
                     </Form>
                 </article>
                 <article
-                    class="min-w-0 rounded-2xl border border-border/70 bg-card"
+                    class="min-w-0 rounded-lg border border-border/70 bg-card"
                 >
                     <div class="border-b border-border/70 px-5 py-4">
                         <h2 class="font-semibold">Subject catalog</h2>
@@ -1276,9 +1272,7 @@ defineOptions({
                     </div>
                 </article>
             </div>
-            <article
-                class="min-w-0 rounded-2xl border border-border/70 bg-card"
-            >
+            <article class="min-w-0 rounded-lg border border-border/70 bg-card">
                 <div class="border-b border-border/70 px-5 py-4">
                     <h2 class="font-semibold">Recent offerings</h2>
                     <p class="mt-1 text-sm leading-5 text-muted-foreground">
@@ -1292,7 +1286,7 @@ defineOptions({
                     <div
                         v-for="offering in offerings"
                         :key="offering.id"
-                        class="min-w-0 rounded-xl border border-border/70 p-4"
+                        class="min-w-0 rounded-lg border border-border/70 p-4"
                     >
                         <div class="flex items-start justify-between gap-3">
                             <p class="min-w-0 font-medium break-words">
@@ -1342,10 +1336,10 @@ defineOptions({
                 >
             </div>
             <article
-                class="min-w-0 rounded-2xl border border-border/70 bg-card p-5"
+                class="min-w-0 rounded-lg border border-border/70 bg-card p-5"
             >
                 <div
-                    class="mb-5 flex items-start gap-3 rounded-xl bg-muted/50 px-4 py-3"
+                    class="mb-5 flex items-start gap-3 rounded-lg bg-muted/50 px-4 py-3"
                 >
                     <Clock3 class="mt-0.5 h-4 w-4 shrink-0 text-sky-600" />
                     <p class="text-xs leading-5 text-muted-foreground">

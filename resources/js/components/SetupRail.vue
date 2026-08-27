@@ -31,7 +31,7 @@ const firstIncompleteIndex = computed(() => {
 <template>
     <nav
         aria-label="Setup progress"
-        class="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm"
+        class="overflow-hidden rounded-lg border border-border/70 bg-card"
     >
         <div
             class="flex flex-col gap-4 px-4 py-4 sm:px-5 lg:flex-row lg:items-center lg:gap-8"
@@ -68,7 +68,7 @@ const firstIncompleteIndex = computed(() => {
                                 step.complete
                                     ? 'border-available/30 bg-available/10 text-available'
                                     : index === firstIncompleteIndex
-                                      ? 'border-primary bg-primary text-primary-foreground shadow-sm'
+                                      ? 'border-primary bg-primary text-primary-foreground'
                                       : 'border-border bg-muted text-muted-foreground'
                             "
                         >

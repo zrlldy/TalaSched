@@ -21,7 +21,10 @@ class TimetableVersionFactory extends Factory
     {
         return [
             'timetable_id' => Timetable::factory(),
-            'organization_id' => fn (array $attributes): int => Timetable::findOrFail($attributes['timetable_id'])->organization_id,
+            'organization_id' => fn (array $attributes): int => Timetable::query()
+                ->whereKey((int) $attributes['timetable_id'])
+                ->firstOrFail()
+                ->organization_id,
             'based_on_version_id' => null,
             'version_number' => 1,
             'status' => TimetableVersionStatus::Draft,

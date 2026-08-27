@@ -115,7 +115,7 @@ function roleHasPermission(
 
         <div
             v-if="!customRolesEnabled"
-            class="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100"
+            class="flex items-start gap-3 rounded-lg border border-warning/30 bg-warning/10 p-4 text-warning-foreground"
             data-test="roles-entitlement-feedback"
         >
             <LockKeyhole class="mt-0.5 h-4 w-4 shrink-0" />
@@ -123,7 +123,7 @@ function roleHasPermission(
                 <p class="font-medium">
                     Custom roles are not included in this plan.
                 </p>
-                <p class="text-amber-900/75 dark:text-amber-100/75">
+                <p class="text-warning-foreground/75">
                     Built-in roles remain available. Upgrade the organization
                     plan to create custom permission sets.
                 </p>
