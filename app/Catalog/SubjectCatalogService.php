@@ -2,6 +2,7 @@
 
 namespace App\Catalog;
 
+use App\Audit\AuditLogger;
 use App\Enums\DeliveryMode;
 use App\Enums\SubjectComponentKind;
 use App\Models\Feature;
@@ -9,13 +10,17 @@ use App\Models\Organization;
 use App\Models\RoomType;
 use App\Models\Subject;
 use App\Models\SubjectComponent;
+use App\Models\User;
 use App\Tenancy\TenantContext;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class SubjectCatalogService
 {
-    public function __construct(private TenantContext $tenantContext) {}
+    public function __construct(
+        private TenantContext $tenantContext,
+        private AuditLogger $auditLogger,
+    ) {}
 
     public function createSubject(
         Organization $organization,
@@ -23,16 +28,17 @@ class SubjectCatalogService
         string $name,
         ?float $units = null,
         ?string $description = null,
+        ?User $actor = null,
     ): Subject {
         $this->assertLabel($code, 'subject_code');
         $this->assertLabel($name, 'subject_name');
         $this->assertUnits($units);
 
-        return $this->tenantContext->run($organization, function () use ($organization, $code, $name, $units, $description): Subject {
-            return DB::transaction(function () use ($organization, $code, $name, $units, $description): Subject {
+        return $this->tenantContext->run($organization, function () use ($organization, $code, $name, $units, $description, $actor): Subject {
+            return DB::transaction(function () use ($organization, $code, $name, $units, $description, $actor): Subject {
                 $this->lockOrganization($organization);
 
-                return Subject::query()->create([
+                $subject = Subject::query()->create([
                     'organization_id' => $organization->getKey(),
                     'code' => $code,
                     'name' => $name,
@@ -40,6 +46,16 @@ class SubjectCatalogService
                     'description' => $description,
                     'is_active' => true,
                 ]);
+
+                $this->auditLogger->record(
+                    action: 'subject.created',
+                    organization: $organization,
+                    actor: $actor,
+                    subject: $subject,
+                    after: $this->subjectSnapshot($subject),
+                );
+
+                return $subject;
             }, attempts: 3);
         });
     }
@@ -51,14 +67,16 @@ class SubjectCatalogService
         ?float $units = null,
         ?string $description = null,
         bool $isActive = true,
+        ?User $actor = null,
     ): Subject {
         $this->assertLabel($name, 'subject_name');
         $this->assertUnits($units);
 
-        return $this->tenantContext->run($organization, function () use ($organization, $subject, $name, $units, $description, $isActive): Subject {
-            return DB::transaction(function () use ($organization, $subject, $name, $units, $description, $isActive): Subject {
+        return $this->tenantContext->run($organization, function () use ($organization, $subject, $name, $units, $description, $isActive, $actor): Subject {
+            return DB::transaction(function () use ($organization, $subject, $name, $units, $description, $isActive, $actor): Subject {
                 $this->lockOrganization($organization);
                 $lockedSubject = $this->lockSubject($organization, $subject);
+                $before = $this->subjectSnapshot($lockedSubject);
                 $lockedSubject->update([
                     'name' => $name,
                     'units' => $units,
@@ -66,7 +84,18 @@ class SubjectCatalogService
                     'is_active' => $isActive,
                 ]);
 
-                return $lockedSubject->fresh();
+                $lockedSubject->refresh();
+
+                $this->auditLogger->record(
+                    action: 'subject.updated',
+                    organization: $organization,
+                    actor: $actor,
+                    subject: $lockedSubject,
+                    before: $before,
+                    after: $this->subjectSnapshot($lockedSubject),
+                );
+
+                return $lockedSubject;
             }, attempts: 3);
         });
     }
@@ -81,16 +110,17 @@ class SubjectCatalogService
         int $defaultDurationMinutes,
         ?int $minimumRoomCapacity = null,
         DeliveryMode $deliveryMode = DeliveryMode::Physical,
+        ?User $actor = null,
     ): SubjectComponent {
         $this->assertLabel($name, 'component_name');
         $this->assertSchedulingValues($weeklyMinutes, $sessionsPerWeek, $defaultDurationMinutes, $minimumRoomCapacity);
 
-        return $this->tenantContext->run($organization, function () use ($organization, $subject, $kind, $name, $weeklyMinutes, $sessionsPerWeek, $defaultDurationMinutes, $minimumRoomCapacity, $deliveryMode): SubjectComponent {
-            return DB::transaction(function () use ($organization, $subject, $kind, $name, $weeklyMinutes, $sessionsPerWeek, $defaultDurationMinutes, $minimumRoomCapacity, $deliveryMode): SubjectComponent {
+        return $this->tenantContext->run($organization, function () use ($organization, $subject, $kind, $name, $weeklyMinutes, $sessionsPerWeek, $defaultDurationMinutes, $minimumRoomCapacity, $deliveryMode, $actor): SubjectComponent {
+            return DB::transaction(function () use ($organization, $subject, $kind, $name, $weeklyMinutes, $sessionsPerWeek, $defaultDurationMinutes, $minimumRoomCapacity, $deliveryMode, $actor): SubjectComponent {
                 $this->lockOrganization($organization);
                 $lockedSubject = $this->lockSubject($organization, $subject);
 
-                return SubjectComponent::query()->create([
+                $component = SubjectComponent::query()->create([
                     'organization_id' => $organization->getKey(),
                     'subject_id' => $lockedSubject->getKey(),
                     'kind' => $kind,
@@ -101,6 +131,16 @@ class SubjectCatalogService
                     'minimum_room_capacity' => $minimumRoomCapacity,
                     'delivery_mode' => $deliveryMode,
                 ]);
+
+                $this->auditLogger->record(
+                    action: 'subject.component_created',
+                    organization: $organization,
+                    actor: $actor,
+                    subject: $lockedSubject,
+                    after: $this->componentSnapshot($component),
+                );
+
+                return $component;
             }, attempts: 3);
         });
     }
@@ -116,13 +156,16 @@ class SubjectCatalogService
         SubjectComponent $component,
         array $roomTypes,
         array $features,
+        ?User $actor = null,
     ): SubjectComponent {
         $this->assertFeatureRequirements($features);
 
-        return $this->tenantContext->run($organization, function () use ($organization, $component, $roomTypes, $features): SubjectComponent {
-            return DB::transaction(function () use ($organization, $component, $roomTypes, $features): SubjectComponent {
+        return $this->tenantContext->run($organization, function () use ($organization, $component, $roomTypes, $features, $actor): SubjectComponent {
+            return DB::transaction(function () use ($organization, $component, $roomTypes, $features, $actor): SubjectComponent {
                 $this->lockOrganization($organization);
                 $lockedComponent = $this->lockComponent($organization, $component);
+                $lockedComponent->load(['subject', 'roomTypes', 'features']);
+                $before = $this->requirementsSnapshot($lockedComponent);
                 $roomTypeIds = $this->lockRoomTypeIds($organization, $roomTypes);
                 $featureRequirements = $this->lockFeatureRequirements($organization, $features);
 
@@ -153,29 +196,50 @@ class SubjectCatalogService
                     ]);
                 }
 
-                return $lockedComponent->fresh(['roomTypes', 'features']);
+                $lockedComponent = $lockedComponent->fresh(['subject', 'roomTypes', 'features']);
+
+                $this->auditLogger->record(
+                    action: 'subject.component_requirements_saved',
+                    organization: $organization,
+                    actor: $actor,
+                    subject: $lockedComponent->subject,
+                    before: $before,
+                    after: $this->requirementsSnapshot($lockedComponent),
+                );
+
+                return $lockedComponent;
             }, attempts: 3);
         });
     }
 
-    public function archiveSubject(Organization $organization, Subject $subject): Subject
+    public function archiveSubject(Organization $organization, Subject $subject, ?User $actor = null): Subject
     {
-        return $this->tenantContext->run($organization, function () use ($organization, $subject): Subject {
-            return DB::transaction(function () use ($organization, $subject): Subject {
+        return $this->tenantContext->run($organization, function () use ($organization, $subject, $actor): Subject {
+            return DB::transaction(function () use ($organization, $subject, $actor): Subject {
                 $this->lockOrganization($organization);
                 $lockedSubject = $this->lockSubject($organization, $subject);
+                $before = $this->subjectSnapshot($lockedSubject);
                 $lockedSubject->update(['is_active' => false]);
                 $lockedSubject->delete();
+
+                $this->auditLogger->record(
+                    action: 'subject.archived',
+                    organization: $organization,
+                    actor: $actor,
+                    subject: $lockedSubject,
+                    before: $before,
+                    after: ['status' => 'archived'],
+                );
 
                 return $lockedSubject->fresh();
             }, attempts: 3);
         });
     }
 
-    public function restoreSubject(Organization $organization, Subject $subject): Subject
+    public function restoreSubject(Organization $organization, Subject $subject, ?User $actor = null): Subject
     {
-        return $this->tenantContext->run($organization, function () use ($organization, $subject): Subject {
-            return DB::transaction(function () use ($organization, $subject): Subject {
+        return $this->tenantContext->run($organization, function () use ($organization, $subject, $actor): Subject {
+            return DB::transaction(function () use ($organization, $subject, $actor): Subject {
                 $this->lockOrganization($organization);
                 $lockedSubject = Subject::withTrashed()
                     ->whereKey($subject->getKey())
@@ -184,8 +248,18 @@ class SubjectCatalogService
                     ->firstOrFail();
                 $lockedSubject->restore();
                 $lockedSubject->update(['is_active' => true]);
+                $lockedSubject->refresh();
 
-                return $lockedSubject->fresh();
+                $this->auditLogger->record(
+                    action: 'subject.restored',
+                    organization: $organization,
+                    actor: $actor,
+                    subject: $lockedSubject,
+                    before: ['status' => 'archived'],
+                    after: $this->subjectSnapshot($lockedSubject),
+                );
+
+                return $lockedSubject;
             }, attempts: 3);
         });
     }
@@ -300,5 +374,58 @@ class SubjectCatalogService
                 throw ValidationException::withMessages(['features' => 'Feature quantities must be positive when provided.']);
             }
         }
+    }
+
+    /**
+     * @return array{id: string, code: string, name: string, units: float|null, is_active: bool}
+     */
+    private function subjectSnapshot(Subject $subject): array
+    {
+        return [
+            'id' => $subject->public_id,
+            'code' => $subject->code,
+            'name' => $subject->name,
+            'units' => $subject->units,
+            'is_active' => $subject->is_active,
+        ];
+    }
+
+    /**
+     * @return array{kind: string, name: string, weekly_minutes: int, sessions_per_week: int, default_duration_minutes: int, minimum_room_capacity: int|null, delivery_mode: string}
+     */
+    private function componentSnapshot(SubjectComponent $component): array
+    {
+        return [
+            'kind' => $component->kind->value,
+            'name' => $component->name,
+            'weekly_minutes' => $component->weekly_minutes,
+            'sessions_per_week' => $component->sessions_per_week,
+            'default_duration_minutes' => $component->default_duration_minutes,
+            'minimum_room_capacity' => $component->minimum_room_capacity,
+            'delivery_mode' => $component->delivery_mode->value,
+        ];
+    }
+
+    /**
+     * @return array{room_type_codes: list<string>, feature_codes: list<string>}
+     */
+    private function requirementsSnapshot(SubjectComponent $component): array
+    {
+        $roomTypeCodes = [];
+
+        foreach ($component->roomTypes->sortBy('code') as $roomType) {
+            $roomTypeCodes[] = $roomType->code;
+        }
+
+        $featureCodes = [];
+
+        foreach ($component->features->sortBy('code') as $feature) {
+            $featureCodes[] = $feature->code;
+        }
+
+        return [
+            'room_type_codes' => $roomTypeCodes,
+            'feature_codes' => $featureCodes,
+        ];
     }
 }

@@ -2,8 +2,10 @@
 
 namespace App\Subscriptions;
 
+use App\Audit\AuditLogger;
 use App\Enums\SubscriptionStatus;
 use App\Models\Organization;
+use App\Models\User;
 use App\Tenancy\TenantContext;
 use Illuminate\Support\Facades\DB;
 use LogicException;
@@ -12,12 +14,15 @@ class ProvisionOrganizationSubscription
 {
     private const STARTER_PLAN_CODE = 'starter';
 
-    public function __construct(private TenantContext $tenantContext) {}
+    public function __construct(
+        private AuditLogger $auditLogger,
+        private TenantContext $tenantContext,
+    ) {}
 
-    public function handle(Organization $organization): void
+    public function handle(Organization $organization, ?User $actor = null): void
     {
-        $this->tenantContext->run($organization, function () use ($organization): void {
-            DB::transaction(function () use ($organization): void {
+        $this->tenantContext->run($organization, function () use ($organization, $actor): void {
+            DB::transaction(function () use ($organization, $actor): void {
                 Organization::query()
                     ->whereKey($organization->getKey())
                     ->lockForUpdate()
@@ -48,6 +53,17 @@ class ProvisionOrganizationSubscription
                     'created_at' => $timestamp,
                     'updated_at' => $timestamp,
                 ]);
+
+                $this->auditLogger->record(
+                    action: 'subscription.provisioned',
+                    organization: $organization,
+                    actor: $actor,
+                    subject: $organization,
+                    after: [
+                        'plan_code' => self::STARTER_PLAN_CODE,
+                        'status' => SubscriptionStatus::Active->value,
+                    ],
+                );
             }, attempts: 3);
         });
     }

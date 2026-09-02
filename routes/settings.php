@@ -47,8 +47,12 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::patch('settings/organizations/{organization:slug}/roles/{role:code}', [OrganizationRoleController::class, 'update'])->name('organizations.roles.update');
         Route::delete('settings/organizations/{organization:slug}/roles/{role:code}', [OrganizationRoleController::class, 'destroy'])->name('organizations.roles.destroy');
 
-        Route::post('settings/organizations/{organization:slug}/invitations', [OrganizationInvitationController::class, 'store'])->name('organizations.invitations.store');
-        Route::delete('settings/organizations/{organization:slug}/invitations/{invitation}', [OrganizationInvitationController::class, 'destroy'])->name('organizations.invitations.destroy');
+        Route::post('settings/organizations/{organization:slug}/invitations', [OrganizationInvitationController::class, 'store'])
+            ->middleware('throttle:organization-invitations')
+            ->name('organizations.invitations.store');
+        Route::delete('settings/organizations/{organization:slug}/invitations/{invitation}', [OrganizationInvitationController::class, 'destroy'])
+            ->middleware('throttle:organization-invitations')
+            ->name('organizations.invitations.destroy');
     });
 });
 

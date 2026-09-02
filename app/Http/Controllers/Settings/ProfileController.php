@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Settings;
 
+use App\Audit\AuditLogger;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Settings\ProfileDeleteRequest;
 use App\Http\Requests\Settings\ProfileUpdateRequest;
@@ -9,12 +10,15 @@ use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class ProfileController extends Controller
 {
+    public function __construct(private AuditLogger $auditLogger) {}
+
     /**
      * Show the user's profile settings page.
      */
@@ -31,13 +35,35 @@ class ProfileController extends Controller
      */
     public function update(ProfileUpdateRequest $request): RedirectResponse
     {
-        $request->user()->fill($request->validated());
+        $user = $request->user();
 
-        if ($request->user()->isDirty('email')) {
-            $request->user()->email_verified_at = null;
+        $user->fill($request->validated());
+
+        $emailWasVerified = $user->email_verified_at !== null;
+        $nameChanged = $user->isDirty('name');
+        $emailChanged = $user->isDirty('email');
+
+        if ($emailChanged) {
+            $user->email_verified_at = null;
         }
 
-        $request->user()->save();
+        DB::transaction(function () use ($user, $emailWasVerified, $nameChanged, $emailChanged): void {
+            $user->save();
+
+            $this->auditLogger->record(
+                action: 'account.profile_updated',
+                actor: $user,
+                subject: $user,
+                before: [
+                    'email_verified' => $emailWasVerified,
+                ],
+                after: [
+                    'name_changed' => $nameChanged,
+                    'email_changed' => $emailChanged,
+                    'email_verified' => $user->email_verified_at !== null,
+                ],
+            );
+        });
 
         Inertia::flash('toast', ['type' => 'success', 'message' => __('Profile updated.')]);
 
@@ -59,7 +85,18 @@ class ProfileController extends Controller
 
         Auth::logout();
 
-        $user->delete();
+        DB::transaction(function () use ($user): void {
+            $this->auditLogger->record(
+                action: 'account.deleted',
+                actor: $user,
+                subject: $user,
+                after: [
+                    'status' => 'deleted',
+                ],
+            );
+
+            $user->delete();
+        });
 
         $request->session()->invalidate();
         $request->session()->regenerateToken();

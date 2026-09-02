@@ -2,6 +2,7 @@
 
 namespace App\Academic;
 
+use App\Audit\AuditLogger;
 use App\Enums\AcademicYearStatus;
 use App\Enums\CalendarExceptionKind;
 use App\Models\AcademicCalendar;
@@ -9,6 +10,7 @@ use App\Models\AcademicPeriod;
 use App\Models\AcademicYear;
 use App\Models\CalendarException;
 use App\Models\Organization;
+use App\Models\User;
 use App\Tenancy\TenantContext;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\DB;
@@ -16,7 +18,10 @@ use Illuminate\Validation\ValidationException;
 
 class AcademicCalendarService
 {
-    public function __construct(private TenantContext $tenantContext) {}
+    public function __construct(
+        private TenantContext $tenantContext,
+        private AuditLogger $auditLogger,
+    ) {}
 
     /**
      * Create or replace operating hours for one weekday in an academic period.
@@ -27,16 +32,24 @@ class AcademicCalendarService
         int $weekday,
         int $startsAtMinute,
         int $endsAtMinute,
+        ?User $actor = null,
     ): AcademicCalendar {
-        return $this->tenantContext->run($organization, function () use ($organization, $academicPeriod, $weekday, $startsAtMinute, $endsAtMinute): AcademicCalendar {
-            return DB::transaction(function () use ($organization, $academicPeriod, $weekday, $startsAtMinute, $endsAtMinute): AcademicCalendar {
+        return $this->tenantContext->run($organization, function () use ($organization, $academicPeriod, $weekday, $startsAtMinute, $endsAtMinute, $actor): AcademicCalendar {
+            return DB::transaction(function () use ($organization, $academicPeriod, $weekday, $startsAtMinute, $endsAtMinute, $actor): AcademicCalendar {
                 $this->lockOrganization($organization);
                 $lockedPeriod = $this->lockPeriod($organization, $academicPeriod);
                 $this->assertPeriodIsOpen($lockedPeriod);
                 $this->assertWeekday($weekday);
                 $this->assertTimeWindow($startsAtMinute, $endsAtMinute);
 
-                return AcademicCalendar::query()->updateOrCreate(
+                $existingCalendar = AcademicCalendar::query()
+                    ->where('organization_id', $organization->getKey())
+                    ->where('academic_period_id', $lockedPeriod->getKey())
+                    ->where('weekday', $weekday)
+                    ->lockForUpdate()
+                    ->first();
+
+                $calendar = AcademicCalendar::query()->updateOrCreate(
                     [
                         'organization_id' => $organization->getKey(),
                         'academic_period_id' => $lockedPeriod->getKey(),
@@ -47,6 +60,17 @@ class AcademicCalendarService
                         'ends_at_minute' => $endsAtMinute,
                     ],
                 )->fresh();
+
+                $this->auditLogger->record(
+                    action: 'academic_calendar.saved',
+                    organization: $organization,
+                    actor: $actor,
+                    subject: $lockedPeriod,
+                    before: $existingCalendar instanceof AcademicCalendar ? $this->calendarSnapshot($existingCalendar) : null,
+                    after: $this->calendarSnapshot($calendar),
+                );
+
+                return $calendar;
             }, attempts: 3);
         });
     }
@@ -62,9 +86,10 @@ class AcademicCalendarService
         string $name,
         ?int $startsAtMinute = null,
         ?int $endsAtMinute = null,
+        ?User $actor = null,
     ): CalendarException {
-        return $this->tenantContext->run($organization, function () use ($organization, $academicPeriod, $date, $kind, $name, $startsAtMinute, $endsAtMinute): CalendarException {
-            return DB::transaction(function () use ($organization, $academicPeriod, $date, $kind, $name, $startsAtMinute, $endsAtMinute): CalendarException {
+        return $this->tenantContext->run($organization, function () use ($organization, $academicPeriod, $date, $kind, $name, $startsAtMinute, $endsAtMinute, $actor): CalendarException {
+            return DB::transaction(function () use ($organization, $academicPeriod, $date, $kind, $name, $startsAtMinute, $endsAtMinute, $actor): CalendarException {
                 $this->lockOrganization($organization);
                 $lockedPeriod = $this->lockPeriod($organization, $academicPeriod);
                 $this->assertPeriodIsOpen($lockedPeriod);
@@ -85,6 +110,8 @@ class AcademicCalendarService
                     ]);
                 }
 
+                $before = $exception->exists ? $this->exceptionSnapshot($exception) : null;
+
                 $exception->fill([
                     'kind' => $kind,
                     'name' => $name,
@@ -92,8 +119,18 @@ class AcademicCalendarService
                     'ends_at_minute' => $endsAtMinute,
                 ]);
                 $exception->save();
+                $exception->refresh();
 
-                return $exception->fresh();
+                $this->auditLogger->record(
+                    action: 'calendar_exception.saved',
+                    organization: $organization,
+                    actor: $actor,
+                    subject: $lockedPeriod,
+                    before: $before,
+                    after: $this->exceptionSnapshot($exception),
+                );
+
+                return $exception;
             }, attempts: 3);
         });
     }
@@ -179,5 +216,31 @@ class AcademicCalendarService
                 'time' => __('Holiday and blocked exceptions must cover the full day.'),
             ]);
         }
+    }
+
+    /**
+     * @return array{weekday: int, starts_at_minute: int, ends_at_minute: int}
+     */
+    private function calendarSnapshot(AcademicCalendar $academicCalendar): array
+    {
+        return [
+            'weekday' => $academicCalendar->weekday,
+            'starts_at_minute' => $academicCalendar->starts_at_minute,
+            'ends_at_minute' => $academicCalendar->ends_at_minute,
+        ];
+    }
+
+    /**
+     * @return array{date: string, kind: string, name: string, starts_at_minute: int|null, ends_at_minute: int|null}
+     */
+    private function exceptionSnapshot(CalendarException $calendarException): array
+    {
+        return [
+            'date' => $calendarException->date->toDateString(),
+            'kind' => $calendarException->kind->value,
+            'name' => $calendarException->name,
+            'starts_at_minute' => $calendarException->starts_at_minute,
+            'ends_at_minute' => $calendarException->ends_at_minute,
+        ];
     }
 }

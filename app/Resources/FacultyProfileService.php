@@ -2,6 +2,7 @@
 
 namespace App\Resources;
 
+use App\Audit\AuditLogger;
 use App\Enums\AvailabilityKind;
 use App\Enums\ResourceType;
 use App\Models\AcademicPeriod;
@@ -10,6 +11,7 @@ use App\Models\FacultyProfile;
 use App\Models\Organization;
 use App\Models\ResourceAvailabilityRule;
 use App\Models\SchedulingResource;
+use App\Models\User;
 use App\Tenancy\TenantContext;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Arr;
@@ -18,14 +20,17 @@ use Illuminate\Validation\ValidationException;
 
 class FacultyProfileService
 {
-    public function __construct(private TenantContext $tenantContext) {}
+    public function __construct(
+        private TenantContext $tenantContext,
+        private AuditLogger $auditLogger,
+    ) {}
 
     /**
      * Create a faculty profile and its canonical scheduling resource together.
      *
      * @param  array<string, mixed>  $attributes
      */
-    public function create(Organization $organization, string $resourceName, array $attributes = []): FacultyProfile
+    public function create(Organization $organization, string $resourceName, array $attributes = [], ?User $actor = null): FacultyProfile
     {
         $this->assertResourceName($resourceName);
         $this->assertLoadLimits(
@@ -33,8 +38,8 @@ class FacultyProfileService
             $attributes['maximum_weekly_minutes'] ?? null,
         );
 
-        return $this->tenantContext->run($organization, function () use ($organization, $resourceName, $attributes): FacultyProfile {
-            return DB::transaction(function () use ($organization, $resourceName, $attributes): FacultyProfile {
+        return $this->tenantContext->run($organization, function () use ($organization, $resourceName, $attributes, $actor): FacultyProfile {
+            return DB::transaction(function () use ($organization, $resourceName, $attributes, $actor): FacultyProfile {
                 $this->lockOrganization($organization);
 
                 $resource = SchedulingResource::query()->create([
@@ -51,7 +56,17 @@ class FacultyProfileService
                 $profile->fill($this->profileAttributes($attributes));
                 $profile->save();
 
-                return $profile->fresh(['resource']);
+                $profile = $profile->fresh(['resource']);
+
+                $this->auditLogger->record(
+                    action: 'faculty_profile.created',
+                    organization: $organization,
+                    actor: $actor,
+                    subject: $profile,
+                    after: $this->profileSnapshot($profile),
+                );
+
+                return $profile;
             }, attempts: 3);
         });
     }
@@ -61,21 +76,34 @@ class FacultyProfileService
      *
      * @param  array<string, mixed>  $attributes
      */
-    public function update(Organization $organization, FacultyProfile $profile, array $attributes): FacultyProfile
+    public function update(Organization $organization, FacultyProfile $profile, array $attributes, ?User $actor = null): FacultyProfile
     {
         $this->assertLoadLimits(
             $attributes['maximum_daily_minutes'] ?? $profile->maximum_daily_minutes,
             $attributes['maximum_weekly_minutes'] ?? $profile->maximum_weekly_minutes,
         );
 
-        return $this->tenantContext->run($organization, function () use ($organization, $profile, $attributes): FacultyProfile {
-            return DB::transaction(function () use ($organization, $profile, $attributes): FacultyProfile {
+        return $this->tenantContext->run($organization, function () use ($organization, $profile, $attributes, $actor): FacultyProfile {
+            return DB::transaction(function () use ($organization, $profile, $attributes, $actor): FacultyProfile {
                 $this->lockOrganization($organization);
                 $lockedProfile = $this->lockProfile($organization, $profile);
+                $lockedProfile->load('resource');
+                $before = $this->profileSnapshot($lockedProfile);
                 $lockedProfile->fill($this->profileAttributes($attributes));
                 $lockedProfile->save();
 
-                return $lockedProfile->fresh(['resource']);
+                $lockedProfile = $lockedProfile->fresh(['resource']);
+
+                $this->auditLogger->record(
+                    action: 'faculty_profile.updated',
+                    organization: $organization,
+                    actor: $actor,
+                    subject: $lockedProfile,
+                    before: $before,
+                    after: $this->profileSnapshot($lockedProfile),
+                );
+
+                return $lockedProfile;
             }, attempts: 3);
         });
     }
@@ -88,9 +116,10 @@ class FacultyProfileService
         FacultyProfile $profile,
         AcademicUnit $academicUnit,
         bool $isPrimary = false,
+        ?User $actor = null,
     ): FacultyProfile {
-        return $this->tenantContext->run($organization, function () use ($organization, $profile, $academicUnit, $isPrimary): FacultyProfile {
-            return DB::transaction(function () use ($organization, $profile, $academicUnit, $isPrimary): FacultyProfile {
+        return $this->tenantContext->run($organization, function () use ($organization, $profile, $academicUnit, $isPrimary, $actor): FacultyProfile {
+            return DB::transaction(function () use ($organization, $profile, $academicUnit, $isPrimary, $actor): FacultyProfile {
                 $this->lockOrganization($organization);
                 $lockedProfile = $this->lockProfile($organization, $profile);
                 $lockedUnit = AcademicUnit::query()
@@ -98,6 +127,12 @@ class FacultyProfileService
                     ->where('organization_id', $organization->getKey())
                     ->lockForUpdate()
                     ->firstOrFail();
+
+                $beforePrimary = DB::table('faculty_unit_assignments')
+                    ->where('organization_id', $organization->getKey())
+                    ->where('faculty_profile_id', $lockedProfile->getKey())
+                    ->where('academic_unit_id', $lockedUnit->getKey())
+                    ->value('is_primary');
 
                 if ($isPrimary) {
                     DB::table('faculty_unit_assignments')
@@ -115,6 +150,15 @@ class FacultyProfileService
                     ['is_primary' => $isPrimary],
                 );
 
+                $this->auditLogger->record(
+                    action: 'faculty_profile.academic_unit_assigned',
+                    organization: $organization,
+                    actor: $actor,
+                    subject: $lockedProfile,
+                    before: $beforePrimary === null ? null : ['academic_unit_id' => $lockedUnit->public_id, 'is_primary' => (bool) $beforePrimary],
+                    after: ['academic_unit_id' => $lockedUnit->public_id, 'is_primary' => $isPrimary],
+                );
+
                 return $lockedProfile->fresh(['academicUnits']);
             }, attempts: 3);
         });
@@ -127,17 +171,33 @@ class FacultyProfileService
         Organization $organization,
         FacultyProfile $profile,
         AcademicUnit $academicUnit,
+        ?User $actor = null,
     ): FacultyProfile {
-        return $this->tenantContext->run($organization, function () use ($organization, $profile, $academicUnit): FacultyProfile {
-            return DB::transaction(function () use ($organization, $profile, $academicUnit): FacultyProfile {
+        return $this->tenantContext->run($organization, function () use ($organization, $profile, $academicUnit, $actor): FacultyProfile {
+            return DB::transaction(function () use ($organization, $profile, $academicUnit, $actor): FacultyProfile {
                 $this->lockOrganization($organization);
                 $lockedProfile = $this->lockProfile($organization, $profile);
+                $lockedUnit = AcademicUnit::query()
+                    ->whereKey($academicUnit->getKey())
+                    ->where('organization_id', $organization->getKey())
+                    ->lockForUpdate()
+                    ->firstOrFail();
 
-                DB::table('faculty_unit_assignments')
+                $deleted = DB::table('faculty_unit_assignments')
                     ->where('organization_id', $organization->getKey())
                     ->where('faculty_profile_id', $lockedProfile->getKey())
-                    ->where('academic_unit_id', $academicUnit->getKey())
+                    ->where('academic_unit_id', $lockedUnit->getKey())
                     ->delete();
+
+                if ($deleted === 1) {
+                    $this->auditLogger->record(
+                        action: 'faculty_profile.academic_unit_removed',
+                        organization: $organization,
+                        actor: $actor,
+                        subject: $lockedProfile,
+                        before: ['academic_unit_id' => $lockedUnit->public_id],
+                    );
+                }
 
                 return $lockedProfile->fresh(['academicUnits']);
             }, attempts: 3);
@@ -158,29 +218,29 @@ class FacultyProfileService
         ?CarbonInterface $effectiveFrom = null,
         ?CarbonInterface $effectiveUntil = null,
         int $priority = 0,
+        ?User $actor = null,
     ): ResourceAvailabilityRule {
         $this->assertTimeWindow($weekday, $startsAtMinute, $endsAtMinute);
         $this->assertEffectiveDates($effectiveFrom, $effectiveUntil);
 
-        return $this->tenantContext->run($organization, function () use ($organization, $profile, $kind, $weekday, $startsAtMinute, $endsAtMinute, $academicPeriod, $effectiveFrom, $effectiveUntil, $priority): ResourceAvailabilityRule {
-            return DB::transaction(function () use ($organization, $profile, $kind, $weekday, $startsAtMinute, $endsAtMinute, $academicPeriod, $effectiveFrom, $effectiveUntil, $priority): ResourceAvailabilityRule {
+        return $this->tenantContext->run($organization, function () use ($organization, $profile, $kind, $weekday, $startsAtMinute, $endsAtMinute, $academicPeriod, $effectiveFrom, $effectiveUntil, $priority, $actor): ResourceAvailabilityRule {
+            return DB::transaction(function () use ($organization, $profile, $kind, $weekday, $startsAtMinute, $endsAtMinute, $academicPeriod, $effectiveFrom, $effectiveUntil, $priority, $actor): ResourceAvailabilityRule {
                 $this->lockOrganization($organization);
                 $lockedProfile = $this->lockProfile($organization, $profile);
-                $periodId = null;
+                $lockedPeriod = null;
 
                 if ($academicPeriod !== null) {
-                    $periodId = AcademicPeriod::query()
+                    $lockedPeriod = AcademicPeriod::query()
                         ->whereKey($academicPeriod->getKey())
                         ->where('organization_id', $organization->getKey())
                         ->lockForUpdate()
-                        ->firstOrFail()
-                        ->getKey();
+                        ->firstOrFail();
                 }
 
-                return ResourceAvailabilityRule::query()->create([
+                $availabilityRule = ResourceAvailabilityRule::query()->create([
                     'organization_id' => $organization->getKey(),
                     'scheduling_resource_id' => $lockedProfile->scheduling_resource_id,
-                    'academic_period_id' => $periodId,
+                    'academic_period_id' => $lockedPeriod?->getKey(),
                     'kind' => $kind,
                     'weekday' => $weekday,
                     'starts_at_minute' => $startsAtMinute,
@@ -189,6 +249,16 @@ class FacultyProfileService
                     'effective_until' => $effectiveUntil,
                     'priority' => $priority,
                 ]);
+
+                $this->auditLogger->record(
+                    action: 'faculty_profile.availability_rule_created',
+                    organization: $organization,
+                    actor: $actor,
+                    subject: $lockedProfile,
+                    after: $this->availabilityRuleSnapshot($availabilityRule, $lockedPeriod),
+                );
+
+                return $availabilityRule;
             }, attempts: 3);
         });
     }
@@ -200,17 +270,28 @@ class FacultyProfileService
         Organization $organization,
         FacultyProfile $profile,
         ResourceAvailabilityRule $rule,
+        ?User $actor = null,
     ): void {
-        $this->tenantContext->run($organization, function () use ($organization, $profile, $rule): void {
-            DB::transaction(function () use ($organization, $profile, $rule): void {
+        $this->tenantContext->run($organization, function () use ($organization, $profile, $rule, $actor): void {
+            DB::transaction(function () use ($organization, $profile, $rule, $actor): void {
                 $this->lockOrganization($organization);
                 $lockedProfile = $this->lockProfile($organization, $profile);
-
-                ResourceAvailabilityRule::query()
+                $lockedRule = ResourceAvailabilityRule::query()
                     ->whereKey($rule->getKey())
                     ->where('organization_id', $organization->getKey())
                     ->where('scheduling_resource_id', $lockedProfile->scheduling_resource_id)
-                    ->delete();
+                    ->lockForUpdate()
+                    ->firstOrFail();
+
+                $this->auditLogger->record(
+                    action: 'faculty_profile.availability_rule_removed',
+                    organization: $organization,
+                    actor: $actor,
+                    subject: $lockedProfile,
+                    before: $this->availabilityRuleSnapshot($lockedRule),
+                );
+
+                $lockedRule->delete();
             }, attempts: 3);
         });
     }
@@ -272,5 +353,37 @@ class FacultyProfileService
         if ($effectiveFrom !== null && $effectiveUntil !== null && $effectiveFrom->greaterThan($effectiveUntil)) {
             throw ValidationException::withMessages(['availability' => 'Availability rules must end on or after their effective start date.']);
         }
+    }
+
+    /**
+     * @return array{id: string, resource_id: string, position: string|null, employment_type: string|null, maximum_daily_minutes: int|null, maximum_weekly_minutes: int|null}
+     */
+    private function profileSnapshot(FacultyProfile $profile): array
+    {
+        return [
+            'id' => $profile->public_id,
+            'resource_id' => $profile->resource->public_id,
+            'position' => $profile->position,
+            'employment_type' => $profile->employment_type?->value,
+            'maximum_daily_minutes' => $profile->maximum_daily_minutes,
+            'maximum_weekly_minutes' => $profile->maximum_weekly_minutes,
+        ];
+    }
+
+    /**
+     * @return array{kind: string, weekday: int, starts_at_minute: int, ends_at_minute: int, academic_period_id: string|null, effective_from: string|null, effective_until: string|null, priority: int}
+     */
+    private function availabilityRuleSnapshot(ResourceAvailabilityRule $availabilityRule, ?AcademicPeriod $academicPeriod = null): array
+    {
+        return [
+            'kind' => $availabilityRule->kind->value,
+            'weekday' => $availabilityRule->weekday,
+            'starts_at_minute' => $availabilityRule->starts_at_minute,
+            'ends_at_minute' => $availabilityRule->ends_at_minute,
+            'academic_period_id' => $academicPeriod?->public_id,
+            'effective_from' => $availabilityRule->effective_from?->toDateString(),
+            'effective_until' => $availabilityRule->effective_until?->toDateString(),
+            'priority' => $availabilityRule->priority,
+        ];
     }
 }

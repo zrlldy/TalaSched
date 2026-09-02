@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 
 test('profile page is displayed', function () {
     $user = User::factory()->create();
@@ -31,6 +32,23 @@ test('profile information can be updated', function () {
     expect($user->name)->toBe('Test User');
     expect($user->email)->toBe('test@example.com');
     expect($user->email_verified_at)->toBeNull();
+
+    $auditEvent = DB::table('audit_events')
+        ->where('action', 'account.profile_updated')
+        ->where('actor_user_id', $user->id)
+        ->first();
+
+    expect($auditEvent)->not->toBeNull()
+        ->and($auditEvent->subject_type)->toBe(User::class)
+        ->and($auditEvent->subject_id)->toBe((string) $user->id)
+        ->and(json_decode($auditEvent->before, associative: true, flags: JSON_THROW_ON_ERROR))
+        ->toBe(['email_verified' => true])
+        ->and(json_decode($auditEvent->after, associative: true, flags: JSON_THROW_ON_ERROR))
+        ->toBe([
+            'name_changed' => true,
+            'email_changed' => true,
+            'email_verified' => false,
+        ]);
 });
 
 test('email verification status is unchanged when the email address is unchanged', function () {
@@ -65,6 +83,17 @@ test('user can delete their account', function () {
 
     $this->assertGuest();
     expect($user->fresh())->toBeNull();
+
+    $auditEvent = DB::table('audit_events')
+        ->where('action', 'account.deleted')
+        ->where('actor_user_id', $user->id)
+        ->first();
+
+    expect($auditEvent)->not->toBeNull()
+        ->and($auditEvent->subject_type)->toBe(User::class)
+        ->and($auditEvent->subject_id)->toBe((string) $user->id)
+        ->and(json_decode($auditEvent->after, associative: true, flags: JSON_THROW_ON_ERROR))
+        ->toBe(['status' => 'deleted']);
 });
 
 test('correct password must be provided to delete account', function () {

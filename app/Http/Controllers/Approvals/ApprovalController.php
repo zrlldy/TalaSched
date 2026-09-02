@@ -36,11 +36,15 @@ use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 use stdClass;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ApprovalController extends Controller
 {
@@ -259,8 +263,7 @@ class ApprovalController extends Controller
 
     public function signatories(Request $request, Organization $currentOrganization): Response
     {
-        $actor = $this->actor($request);
-        $this->authorizeManagement($currentOrganization, $actor);
+        Gate::forUser($this->actor($request))->authorize('viewAny', [SignatoryProfile::class, $currentOrganization]);
         $profiles = DB::table('signatory_profiles as profiles')
             ->join('users', 'users.id', '=', 'profiles.user_id')
             ->join('organization_members', function (JoinClause $join) use ($currentOrganization): void {
@@ -302,6 +305,12 @@ class ApprovalController extends Controller
                 'valid_from' => $profile->valid_from === null ? null : (string) $profile->valid_from,
                 'valid_until' => $profile->valid_until === null ? null : (string) $profile->valid_until,
                 'has_signature' => $profile->signature_path !== null,
+                'signature_download_url' => $profile->signature_path === null
+                    ? null
+                    : URL::temporarySignedRoute('approvals.signatories.signature.download', now()->addMinutes(5), [
+                        'current_organization' => $currentOrganization->slug,
+                        'signatory_profile' => (string) $profile->public_id,
+                    ]),
             ])->values()->all(),
             'members' => $currentOrganization->memberships()->with('user')->orderBy('id')->get()->map(fn (Membership $membership): array => [
                 'id' => $membership->public_id,
@@ -317,6 +326,23 @@ class ApprovalController extends Controller
                     'name' => $unit->name,
                 ])->values()->all(),
         ]);
+    }
+
+    public function downloadSignatorySignature(
+        Request $request,
+        Organization $currentOrganization,
+        SignatoryProfile $signatoryProfile,
+    ): StreamedResponse {
+        abort_unless($signatoryProfile->organization_id === $currentOrganization->getKey(), 404);
+        Gate::forUser($this->actor($request))->authorize('view', $signatoryProfile);
+
+        $signaturePath = $signatoryProfile->signature_path;
+        abort_if($signaturePath === null || ! Storage::disk(SignatoryProfile::SIGNATURE_DISK)->exists($signaturePath), 404);
+
+        return Storage::disk(SignatoryProfile::SIGNATURE_DISK)->download(
+            $signaturePath,
+            'signature-'.$signatoryProfile->public_id.'.'.pathinfo($signaturePath, PATHINFO_EXTENSION),
+        );
     }
 
     public function storeWorkflow(

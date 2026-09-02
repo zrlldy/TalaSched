@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Organizations;
 
 use App\Actions\Organizations\CreateOrganization;
 use App\Actions\Organizations\GetPendingOrganizationInvitations;
+use App\Audit\AuditLogger;
 use App\Enums\CapabilityKey;
 use App\Enums\OrganizationRole;
 use App\Http\Controllers\Controller;
@@ -24,7 +25,10 @@ use Inertia\Response;
 
 class OrganizationController extends Controller
 {
-    public function __construct(private UsageService $usage) {}
+    public function __construct(
+        private AuditLogger $auditLogger,
+        private UsageService $usage,
+    ) {}
 
     /**
      * Display a listing of the user's organizations.
@@ -125,8 +129,24 @@ class OrganizationController extends Controller
 
         $organization = DB::transaction(function () use ($request, $organization) {
             $organization = Organization::whereKey($organization->id)->lockForUpdate()->firstOrFail();
+            $before = [
+                'name' => $organization->name,
+                'slug' => $organization->slug,
+            ];
 
             $organization->update(['name' => $request->validated('name')]);
+
+            $this->auditLogger->record(
+                action: 'organization.updated',
+                organization: $organization,
+                actor: $request->user(),
+                subject: $organization,
+                before: $before,
+                after: [
+                    'name' => $organization->name,
+                    'slug' => $organization->slug,
+                ],
+            );
 
             return $organization;
         });
@@ -174,6 +194,17 @@ class OrganizationController extends Controller
 
             $this->usage->releaseIfReserved($lockedOrganization, CapabilityKey::MaxMembers);
             $membership->delete();
+
+            $this->auditLogger->record(
+                action: 'organization.member_left',
+                organization: $lockedOrganization,
+                actor: $user,
+                subject: $membership,
+                before: [
+                    'role' => $membership->role->value,
+                ],
+                after: ['membership' => 'removed'],
+            );
         });
 
         Inertia::flash('toast', ['type' => 'success', 'message' => __('You left the organization ":name"', ['name' => $organization->name])]);
@@ -186,12 +217,26 @@ class OrganizationController extends Controller
      */
     public function destroy(DeleteOrganizationRequest $request, Organization $organization): RedirectResponse
     {
-        DB::transaction(function () use ($organization) {
+        DB::transaction(function () use ($organization, $request): void {
+            $before = [
+                'name' => $organization->name,
+                'slug' => $organization->slug,
+            ];
+
             User::where('current_organization_id', $organization->id)
                 ->each(fn (User $affectedUser) => $affectedUser->switchToFallbackOrganization($organization));
 
             $organization->invitations()->delete();
             $organization->delete();
+
+            $this->auditLogger->record(
+                action: 'organization.deleted',
+                organization: $organization,
+                actor: $request->user(),
+                subject: $organization,
+                before: $before,
+                after: ['status' => 'deleted'],
+            );
         });
 
         Inertia::flash('toast', ['type' => 'success', 'message' => __('Organization deleted.')]);

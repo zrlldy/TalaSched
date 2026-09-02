@@ -2,10 +2,12 @@
 
 namespace App\Academic;
 
+use App\Audit\AuditLogger;
 use App\Models\AcademicUnit;
 use App\Models\AcademicUnitType;
 use App\Models\Organization;
 use App\Models\StudentGroup;
+use App\Models\User;
 use App\Tenancy\TenantContext;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
@@ -17,7 +19,10 @@ use Illuminate\Validation\ValidationException;
 
 class AcademicHierarchyService
 {
-    public function __construct(private TenantContext $tenantContext) {}
+    public function __construct(
+        private TenantContext $tenantContext,
+        private AuditLogger $auditLogger,
+    ) {}
 
     /**
      * Create a unit and its closure rows atomically.
@@ -30,9 +35,10 @@ class AcademicHierarchyService
         ?AcademicUnit $parent = null,
         ?CarbonInterface $activeFrom = null,
         ?CarbonInterface $activeUntil = null,
+        ?User $actor = null,
     ): AcademicUnit {
-        return $this->tenantContext->run($organization, function () use ($organization, $type, $name, $code, $parent, $activeFrom, $activeUntil): AcademicUnit {
-            return DB::transaction(function () use ($organization, $type, $name, $code, $parent, $activeFrom, $activeUntil): AcademicUnit {
+        return $this->tenantContext->run($organization, function () use ($organization, $type, $name, $code, $parent, $activeFrom, $activeUntil, $actor): AcademicUnit {
+            return DB::transaction(function () use ($organization, $type, $name, $code, $parent, $activeFrom, $activeUntil, $actor): AcademicUnit {
                 $lockedType = AcademicUnitType::query()
                     ->whereKey($type->getKey())
                     ->where('organization_id', $organization->getKey())
@@ -59,8 +65,17 @@ class AcademicHierarchyService
                 ]);
 
                 $this->insertClosureRows($organization, $unit, $lockedParent);
+                $unit->refresh();
 
-                return $unit->fresh();
+                $this->auditLogger->record(
+                    action: 'academic_unit.created',
+                    organization: $organization,
+                    actor: $actor,
+                    subject: $unit,
+                    after: $this->unitSnapshot($unit),
+                );
+
+                return $unit;
             }, attempts: 3);
         });
     }
@@ -68,10 +83,10 @@ class AcademicHierarchyService
     /**
      * Move a unit and rewrite its subtree closure paths atomically.
      */
-    public function move(Organization $organization, AcademicUnit $unit, ?AcademicUnit $newParent): AcademicUnit
+    public function move(Organization $organization, AcademicUnit $unit, ?AcademicUnit $newParent, ?User $actor = null): AcademicUnit
     {
-        return $this->tenantContext->run($organization, function () use ($organization, $unit, $newParent): AcademicUnit {
-            return DB::transaction(function () use ($organization, $unit, $newParent): AcademicUnit {
+        return $this->tenantContext->run($organization, function () use ($organization, $unit, $newParent, $actor): AcademicUnit {
+            return DB::transaction(function () use ($organization, $unit, $newParent, $actor): AcademicUnit {
                 $unitIdsToLock = collect([$unit->getKey(), $newParent?->getKey()])
                     ->filter()
                     ->unique()
@@ -168,9 +183,20 @@ class AcademicHierarchyService
                     }
                 }
 
+                $before = ['parent_id' => $this->parentPublicId($organization, $lockedUnit->parent_id)];
                 $lockedUnit->update(['parent_id' => $lockedParent?->getKey()]);
+                $lockedUnit->refresh();
 
-                return $lockedUnit->fresh();
+                $this->auditLogger->record(
+                    action: 'academic_unit.moved',
+                    organization: $organization,
+                    actor: $actor,
+                    subject: $lockedUnit,
+                    before: $before,
+                    after: ['parent_id' => $lockedParent?->public_id],
+                );
+
+                return $lockedUnit;
             }, attempts: 3);
         });
     }
@@ -178,10 +204,10 @@ class AcademicHierarchyService
     /**
      * Archive a leaf unit with no active student groups.
      */
-    public function archive(Organization $organization, AcademicUnit $unit): AcademicUnit
+    public function archive(Organization $organization, AcademicUnit $unit, ?User $actor = null): AcademicUnit
     {
-        return $this->tenantContext->run($organization, function () use ($organization, $unit): AcademicUnit {
-            return DB::transaction(function () use ($organization, $unit): AcademicUnit {
+        return $this->tenantContext->run($organization, function () use ($organization, $unit, $actor): AcademicUnit {
+            return DB::transaction(function () use ($organization, $unit, $actor): AcademicUnit {
                 $lockedUnit = AcademicUnit::query()
                     ->whereKey($unit->getKey())
                     ->where('organization_id', $organization->getKey())
@@ -200,8 +226,18 @@ class AcademicHierarchyService
                     ]);
                 }
 
+                $before = $this->unitSnapshot($lockedUnit);
                 $lockedUnit->delete();
                 $lockedUnit->load(['parent', 'type']);
+
+                $this->auditLogger->record(
+                    action: 'academic_unit.archived',
+                    organization: $organization,
+                    actor: $actor,
+                    subject: $lockedUnit,
+                    before: $before,
+                    after: ['archived_at' => $lockedUnit->deleted_at?->toIso8601String()],
+                );
 
                 return $lockedUnit;
             }, attempts: 3);
@@ -304,5 +340,31 @@ class AcademicHierarchyService
         }
 
         DB::table('academic_unit_closure')->insert($rows);
+    }
+
+    /**
+     * @return array{id: string, name: string, code: string|null, active_from: string|null, active_until: string|null}
+     */
+    private function unitSnapshot(AcademicUnit $academicUnit): array
+    {
+        return [
+            'id' => $academicUnit->public_id,
+            'name' => $academicUnit->name,
+            'code' => $academicUnit->code,
+            'active_from' => $academicUnit->active_from?->toDateString(),
+            'active_until' => $academicUnit->active_until?->toDateString(),
+        ];
+    }
+
+    private function parentPublicId(Organization $organization, ?int $parentId): ?string
+    {
+        if ($parentId === null) {
+            return null;
+        }
+
+        return AcademicUnit::query()
+            ->where('organization_id', $organization->getKey())
+            ->whereKey($parentId)
+            ->value('public_id');
     }
 }

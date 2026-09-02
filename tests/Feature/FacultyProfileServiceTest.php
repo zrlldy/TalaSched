@@ -88,14 +88,20 @@ test('faculty service manages profiles, department links, load limits, and prefe
         ->and($preferred->kind)->toBe(AvailabilityKind::Preferred)
         ->and($preferred->academic_period_id)->toBeNull()
         ->and($unavailable->priority)->toBe(10)
-        ->and(app(TenantContext::class)->organization())->toBeNull();
+        ->and(app(TenantContext::class)->organization())->toBeNull()
+        ->and(DB::table('audit_events')->where('action', 'faculty_profile.created')->count())->toBe(1)
+        ->and(DB::table('audit_events')->where('action', 'faculty_profile.updated')->count())->toBe(1)
+        ->and(DB::table('audit_events')->where('action', 'faculty_profile.academic_unit_assigned')->count())->toBe(2)
+        ->and(DB::table('audit_events')->where('action', 'faculty_profile.availability_rule_created')->count())->toBe(2);
 
     $service->removeAvailabilityRule($organization, $profile, $preferred);
     $service->removeFromAcademicUnit($organization, $profile, $program);
 
     expect($profile->fresh()->academicUnits)->toHaveCount(1)
         ->and($profile->fresh()->academicUnits->first()->is($department))->toBeTrue()
-        ->and(DB::table('resource_availability_rules')->where('id', $preferred->getKey())->exists())->toBeFalse();
+        ->and(DB::table('resource_availability_rules')->where('id', $preferred->getKey())->exists())->toBeFalse()
+        ->and(DB::table('audit_events')->where('action', 'faculty_profile.academic_unit_removed')->count())->toBe(1)
+        ->and(DB::table('audit_events')->where('action', 'faculty_profile.availability_rule_removed')->count())->toBe(1);
 });
 
 test('faculty service rejects invalid limits and foreign tenant references', function (): void {

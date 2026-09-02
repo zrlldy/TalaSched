@@ -20,6 +20,9 @@ use App\Models\SubjectOffering;
 use App\Models\Timetable;
 use App\Models\TimetableVersion;
 use App\Models\User;
+use App\Scheduling\TimetableViewFilters;
+use App\Scheduling\TimetableViewQuery;
+use Illuminate\Support\Facades\DB;
 use Inertia\Testing\AssertableInertia as Assert;
 
 beforeEach(function (): void {
@@ -156,6 +159,49 @@ test('canonical timetable views filter one recurring entry across organization r
     }
 
     expect(ScheduleEntry::query()->count())->toBe(1);
+});
+
+test('canonical timetable views use a bounded query count as entry volume grows', function (): void {
+    $query = app(TimetableViewQuery::class);
+    $filters = new TimetableViewFilters(
+        scope: 'organization',
+        versionPublicId: $this->version->public_id,
+        resourcePublicId: null,
+        unitPublicId: null,
+        date: null,
+        weekday: null,
+    );
+
+    DB::enableQueryLog();
+
+    try {
+        DB::flushQueryLog();
+        $singleEntryView = $query->handle($this->organization, $this->timetable, $filters);
+        $singleEntryQueryCount = count(DB::getQueryLog());
+    } finally {
+        DB::disableQueryLog();
+    }
+
+    ScheduleEntry::factory()->count(5)->create([
+        'organization_id' => $this->organization->id,
+        'timetable_version_id' => $this->version->id,
+        'offering_component_id' => $this->entry->offering_component_id,
+    ]);
+
+    DB::enableQueryLog();
+
+    try {
+        DB::flushQueryLog();
+        $multiEntryView = $query->handle($this->organization, $this->timetable, $filters);
+        $multiEntryQueryCount = count(DB::getQueryLog());
+    } finally {
+        DB::disableQueryLog();
+    }
+
+    expect($singleEntryView->entries)->toHaveCount(1)
+        ->and($multiEntryView->entries)->toHaveCount(6)
+        ->and($singleEntryQueryCount)->toBe(13)
+        ->and($multiEntryQueryCount)->toBe($singleEntryQueryCount);
 });
 
 test('canonical timetable views project dated cancellation and rescheduling without duplicating entries', function (): void {

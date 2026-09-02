@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Inertia\Testing\AssertableInertia as Assert;
 use Laravel\Fortify\Features;
@@ -84,6 +85,17 @@ test('password can be updated', function () {
         ->assertRedirect(route('security.edit'));
 
     expect(Hash::check('new-password', $user->refresh()->password))->toBeTrue();
+
+    $auditEvent = DB::table('audit_events')
+        ->where('action', 'account.password_updated')
+        ->where('actor_user_id', $user->id)
+        ->first();
+
+    expect($auditEvent)->not->toBeNull()
+        ->and($auditEvent->subject_type)->toBe(User::class)
+        ->and($auditEvent->subject_id)->toBe((string) $user->id)
+        ->and($auditEvent->before)->toBeNull()
+        ->and($auditEvent->after)->toBeNull();
 });
 
 test('correct password must be provided to update password', function () {

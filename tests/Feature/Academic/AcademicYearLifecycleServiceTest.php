@@ -45,7 +45,8 @@ test('academic years support configurable period kinds and a guarded lifecycle',
     $closedYear = $service->close($organization, $activeYear);
 
     expect($closedYear->status)->toBe(AcademicYearStatus::Closed)
-        ->and($service->close($organization, $closedYear)->status)->toBe(AcademicYearStatus::Closed);
+        ->and($service->close($organization, $closedYear)->status)->toBe(AcademicYearStatus::Closed)
+        ->and(DB::table('audit_events')->where('action', 'academic_year.closed')->count())->toBe(1);
 });
 
 test('academic year activation requires periods with contiguous sequences and rejects overlaps', function (): void {

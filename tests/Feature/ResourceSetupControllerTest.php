@@ -18,6 +18,7 @@ use App\Models\StudentGroup;
 use App\Models\Subject;
 use App\Models\SubjectOffering;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 use Inertia\Testing\AssertableInertia as Assert;
 
 test('resource setup exposes public contracts and creates the dependency chain', function (): void {
@@ -149,7 +150,29 @@ test('resource setup exposes public contracts and creates the dependency chain',
 
     expect($profile->academicUnits()->whereKey($unit->getKey())->exists())->toBeTrue()
         ->and($room->resource->public_id)->not->toBe((string) $room->resource->getKey())
-        ->and(SubjectOffering::query()->where('organization_id', $organization->getKey())->count())->toBe(1);
+        ->and(SubjectOffering::query()->where('organization_id', $organization->getKey())->count())->toBe(1)
+        ->and(DB::table('audit_events')->where('action', 'room_type.created')->value('actor_user_id'))
+        ->toBe($owner->getKey())
+        ->and(DB::table('audit_events')->where('action', 'room_feature.created')->value('actor_user_id'))
+        ->toBe($owner->getKey())
+        ->and(DB::table('audit_events')->where('action', 'building.created')->value('actor_user_id'))
+        ->toBe($owner->getKey())
+        ->and(DB::table('audit_events')->where('action', 'room.created')->value('actor_user_id'))
+        ->toBe($owner->getKey())
+        ->and(DB::table('audit_events')->where('action', 'resource_availability_rule.created')->value('actor_user_id'))
+        ->toBe($owner->getKey())
+        ->and(DB::table('audit_events')->where('action', 'faculty_profile.created')->value('actor_user_id'))
+        ->toBe($owner->getKey())
+        ->and(DB::table('audit_events')->where('action', 'faculty_profile.academic_unit_assigned')->value('actor_user_id'))
+        ->toBe($owner->getKey())
+        ->and(DB::table('audit_events')->where('action', 'subject.created')->value('actor_user_id'))
+        ->toBe($owner->getKey())
+        ->and(DB::table('audit_events')->where('action', 'subject.component_created')->value('actor_user_id'))
+        ->toBe($owner->getKey())
+        ->and(DB::table('audit_events')->where('action', 'subject.component_requirements_saved')->value('actor_user_id'))
+        ->toBe($owner->getKey())
+        ->and(DB::table('audit_events')->where('action', 'subject_offering.created')->value('actor_user_id'))
+        ->toBe($owner->getKey());
 
     $this->actingAs($owner)
         ->get(route('resources.setup', $organization))

@@ -8,6 +8,7 @@ import {
 } from '@lucide/vue';
 import { computed } from 'vue';
 import PendingOrganizationInvitationsModal from '@/components/PendingOrganizationInvitationsModal.vue';
+import WorkspaceState from '@/components/WorkspaceState.vue';
 import { dashboard } from '@/routes';
 import { setup as academicSetup } from '@/routes/academic';
 import { index as organizations } from '@/routes/organizations';
@@ -221,34 +222,22 @@ const resourceSetupUrl = computed(() =>
                 </article>
             </section>
 
-            <section
+            <WorkspaceState
                 v-else
-                class="rounded-lg border border-dashed border-border bg-card p-7 text-center"
+                variant="empty"
+                title="Choose a workspace to get started"
+                description="Select an existing institution or create a new one before setting up its academic calendar and scheduling resources."
             >
-                <div
-                    class="mx-auto flex size-11 items-center justify-center rounded-md border border-schedule/25 bg-schedule/10 text-schedule"
-                >
-                    <Sparkles class="size-5" />
-                </div>
-                <h2
-                    class="mt-4 text-lg font-semibold tracking-[-0.02em] text-foreground"
-                >
-                    Choose a workspace to get started
-                </h2>
-                <p
-                    class="mx-auto mt-2 max-w-lg text-sm leading-6 text-muted-foreground"
-                >
-                    Select an existing institution or create a new one before
-                    setting up its academic calendar and scheduling resources.
-                </p>
-                <Link
-                    :href="organizations().url"
-                    class="mt-5 inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none"
-                >
-                    View workspaces
-                    <ArrowRight class="size-4" />
-                </Link>
-            </section>
+                <template #action>
+                    <Link
+                        :href="organizations().url"
+                        class="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none"
+                    >
+                        View workspaces
+                        <ArrowRight class="size-4" />
+                    </Link>
+                </template>
+            </WorkspaceState>
 
             <section
                 aria-labelledby="principles-heading"

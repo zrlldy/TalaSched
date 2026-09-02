@@ -205,6 +205,7 @@ class AcademicSetupController extends Controller
             name: $request->validated('name'),
             startsOn: CarbonImmutable::parse($request->validated('starts_on')),
             endsOn: CarbonImmutable::parse($request->validated('ends_on')),
+            actor: $request->user(),
         );
 
         Inertia::flash('toast', ['type' => 'success', 'message' => __('Academic year created.')]);
@@ -224,6 +225,7 @@ class AcademicSetupController extends Controller
             sequence: $request->validated('sequence'),
             startsOn: CarbonImmutable::parse($request->validated('starts_on')),
             endsOn: CarbonImmutable::parse($request->validated('ends_on')),
+            actor: $request->user(),
         );
 
         Inertia::flash('toast', ['type' => 'success', 'message' => __('Academic period created.')]);
@@ -235,7 +237,7 @@ class AcademicSetupController extends Controller
     {
         $year = $this->academicYear($currentOrganization, $academicYear);
         Gate::forUser($request->user())->authorize('update', $year);
-        $lifecycle->activate($currentOrganization, $year);
+        $lifecycle->activate($currentOrganization, $year, $request->user());
 
         Inertia::flash('toast', ['type' => 'success', 'message' => __('Academic year activated.')]);
 
@@ -244,7 +246,7 @@ class AcademicSetupController extends Controller
 
     public function applyPreset(ApplyAcademicPresetRequest $request, Organization $currentOrganization, AcademicHierarchyPresetService $presets): RedirectResponse
     {
-        $presets->apply($currentOrganization, AcademicHierarchyPreset::from($request->validated('preset')));
+        $presets->apply($currentOrganization, AcademicHierarchyPreset::from($request->validated('preset')), $request->user());
 
         Inertia::flash('toast', ['type' => 'success', 'message' => __('Academic structure preset applied.')]);
 
@@ -270,6 +272,7 @@ class AcademicSetupController extends Controller
             parent: $parent,
             activeFrom: $this->dateOrNull($request->validated('active_from')),
             activeUntil: $this->dateOrNull($request->validated('active_until')),
+            actor: $request->user(),
         );
 
         Inertia::flash('toast', ['type' => 'success', 'message' => __('Academic unit created.')]);
@@ -287,7 +290,7 @@ class AcademicSetupController extends Controller
             ? $this->academicUnit($currentOrganization, $parentId)
             : null;
 
-        $hierarchy->move($currentOrganization, $unit, $parent);
+        $hierarchy->move($currentOrganization, $unit, $parent, $request->user());
 
         Inertia::flash('toast', ['type' => 'success', 'message' => __('Academic unit moved.')]);
 
@@ -298,7 +301,7 @@ class AcademicSetupController extends Controller
     {
         $unit = $this->academicUnit($currentOrganization, $academicUnit);
         Gate::forUser($request->user())->authorize('delete', $unit);
-        $hierarchy->archive($currentOrganization, $unit);
+        $hierarchy->archive($currentOrganization, $unit, $request->user());
 
         Inertia::flash('toast', ['type' => 'success', 'message' => __('Academic unit archived.')]);
 
@@ -315,6 +318,7 @@ class AcademicSetupController extends Controller
             weekday: (int) $request->validated('weekday'),
             startsAtMinute: (int) $request->validated('starts_at_minute'),
             endsAtMinute: (int) $request->validated('ends_at_minute'),
+            actor: $request->user(),
         );
 
         Inertia::flash('toast', ['type' => 'success', 'message' => __('Operating hours saved.')]);
@@ -334,6 +338,7 @@ class AcademicSetupController extends Controller
             name: $request->validated('name'),
             startsAtMinute: $this->minuteOrNull($request->validated('starts_at_minute')),
             endsAtMinute: $this->minuteOrNull($request->validated('ends_at_minute')),
+            actor: $request->user(),
         );
 
         Inertia::flash('toast', ['type' => 'success', 'message' => __('Calendar exception saved.')]);
@@ -351,6 +356,7 @@ class AcademicSetupController extends Controller
             studentGroup: $group,
             activeFrom: $this->dateOrNull($request->validated('active_from')),
             activeUntil: $this->dateOrNull($request->validated('active_until')),
+            actor: $request->user(),
         );
 
         Inertia::flash('toast', ['type' => 'success', 'message' => __('Student-group dates saved.')]);
@@ -364,7 +370,7 @@ class AcademicSetupController extends Controller
         Gate::forUser($request->user())->authorize('update', $group);
         $unit = $this->academicUnit($currentOrganization, $request->validated('academic_unit_id'));
 
-        $groups->assignToUnit($currentOrganization, $group, $unit);
+        $groups->assignToUnit($currentOrganization, $group, $unit, $request->user());
 
         Inertia::flash('toast', ['type' => 'success', 'message' => __('Student group assigned.')]);
 
@@ -383,9 +389,9 @@ class AcademicSetupController extends Controller
             ->exists();
 
         if ($enrolled) {
-            $groups->unenrollFromPeriod($currentOrganization, $group, $period);
+            $groups->unenrollFromPeriod($currentOrganization, $group, $period, $request->user());
         } else {
-            $groups->enrollInPeriod($currentOrganization, $group, $period);
+            $groups->enrollInPeriod($currentOrganization, $group, $period, $request->user());
         }
 
         Inertia::flash('toast', ['type' => 'success', 'message' => $enrolled ? __('Student group unenrolled.') : __('Student group enrolled.')]);

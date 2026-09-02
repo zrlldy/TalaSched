@@ -28,3 +28,26 @@ test('audit events reuse the active request correlation identifier', function ()
         ->and($auditEvent->correlation_id)->toBe($correlationId)
         ->and($auditEvent->subject_id)->toBe($user->currentOrganization->public_id);
 });
+
+test('audit events record the active impersonator context', function () {
+    $actor = User::factory()->withOwnedOrganization()->create();
+    $impersonator = User::factory()->create();
+    Context::add('impersonator_user_id', $impersonator->id);
+
+    try {
+        app(AuditLogger::class)->record(
+            action: 'test.impersonation',
+            organization: $actor->currentOrganization,
+            actor: $actor,
+            subject: $actor->currentOrganization,
+        );
+    } finally {
+        Context::forget('impersonator_user_id');
+    }
+
+    $auditEvent = DB::table('audit_events')->where('action', 'test.impersonation')->first();
+
+    expect($auditEvent)->not->toBeNull()
+        ->and($auditEvent->actor_user_id)->toBe($actor->id)
+        ->and($auditEvent->impersonator_user_id)->toBe($impersonator->id);
+});

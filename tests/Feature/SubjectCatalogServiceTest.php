@@ -50,20 +50,25 @@ test('catalog service manages subjects, components, and room requirements', func
         ->and($component->features->first()->is($feature))->toBeTrue()
         ->and(DB::table('subject_component_features')
             ->where('subject_component_id', $component->getKey())
-            ->value('minimum_quantity'))->toBe(1);
+            ->value('minimum_quantity'))->toBe(1)
+        ->and(DB::table('audit_events')->where('action', 'subject.created')->count())->toBe(1)
+        ->and(DB::table('audit_events')->where('action', 'subject.component_created')->count())->toBe(1)
+        ->and(DB::table('audit_events')->where('action', 'subject.component_requirements_saved')->count())->toBe(1);
 
     $archivedSubject = $service->archiveSubject($organization, $subject);
 
     expect($archivedSubject->trashed())->toBeTrue()
         ->and($archivedSubject->is_active)->toBeFalse()
         ->and(Subject::query()->whereKey($subject->getKey())->exists())->toBeFalse()
-        ->and(DB::table('subject_components')->where('id', $component->getKey())->exists())->toBeTrue();
+        ->and(DB::table('subject_components')->where('id', $component->getKey())->exists())->toBeTrue()
+        ->and(DB::table('audit_events')->where('action', 'subject.archived')->count())->toBe(1);
 
     $restoredSubject = $service->restoreSubject($organization, $archivedSubject);
 
     expect($restoredSubject->trashed())->toBeFalse()
         ->and($restoredSubject->is_active)->toBeTrue()
-        ->and(Subject::query()->whereKey($subject->getKey())->exists())->toBeTrue();
+        ->and(Subject::query()->whereKey($subject->getKey())->exists())->toBeTrue()
+        ->and(DB::table('audit_events')->where('action', 'subject.restored')->count())->toBe(1);
 });
 
 test('catalog service rejects invalid values and foreign room requirements', function (): void {

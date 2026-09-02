@@ -9,9 +9,12 @@ Before planning or editing, find the row whose globs match the file's path and r
 | app/** | .ai/rules/app.md |
 | {app,database}/** | .ai/rules/appdatabase.md |
 | app/Approvals/** | .ai/rules/approvals.md |
+| app/Audit/** | .ai/rules/audit.md |
 | app/Authorization/** | .ai/rules/authorization.md |
 | app/Concerns/HasOrganizations.php | .ai/rules/concerns.md |
+| app/Scheduling/{Contracts,Data}/** | .ai/rules/contracts-data.md |
 | app/Scheduling/CompareTimetableVersions.php,app/Scheduling/TimetableVersionComparisonData.php,app/Http/Requests/Scheduling/CompareTimetableVersionsRequest.php,app/Http/Controllers/Scheduling/TimetableVersionComparisonController.php | .ai/rules/controllers-scheduling.md |
+| database/migrations/*audit* | .ai/rules/database-migrations.md |
 | app/Approvals/**,app/Enums/Approval*.php,app/Scheduling/ValidateTimetableVersion.php,app/Policies/TimetableVersionPolicy.php | .ai/rules/enums-scheduling-policies.md |
 | app/Http/** | .ai/rules/http.md |
 | {app,database/factories,resources/js}/** | .ai/rules/js.md |

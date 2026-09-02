@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Authorization\OrganizationPermissionResolver;
+use App\Models\Organization;
 use App\Scheduling\ConstraintRegistry;
 use App\Scheduling\Constraints\AcademicCalendarConstraintHandler;
 use App\Scheduling\Constraints\FacultyLoadConstraintHandler;
@@ -21,9 +22,12 @@ use App\Scheduling\Constraints\RoomTypeConstraintHandler;
 use App\Scheduling\Constraints\VersionEditableConstraintHandler;
 use App\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
+use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
 
@@ -67,6 +71,7 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->configureDefaults();
+        $this->configureRateLimiting();
     }
 
     /**
@@ -89,5 +94,56 @@ class AppServiceProvider extends ServiceProvider
                 ->uncompromised()
             : null,
         );
+    }
+
+    /**
+     * Configure organization-scoped limits for expensive or security-sensitive commands.
+     */
+    private function configureRateLimiting(): void
+    {
+        RateLimiter::for('organization-invitations', fn (Request $request): Limit => $this->organizationLimit(
+            $request,
+            'organization-invitations',
+            10,
+        ));
+
+        RateLimiter::for('organization-invitation-responses', fn (Request $request): Limit => $this->organizationLimit(
+            $request,
+            'organization-invitation-responses',
+            10,
+        ));
+
+        RateLimiter::for('schedule-validation', fn (Request $request): Limit => $this->organizationLimit(
+            $request,
+            'schedule-validation',
+            30,
+        ));
+
+        RateLimiter::for('uploads', fn (Request $request): Limit => $this->organizationLimit(
+            $request,
+            'uploads',
+            10,
+        ));
+    }
+
+    /**
+     * Limit an authenticated actor within the organization addressed by the route.
+     */
+    private function organizationLimit(Request $request, string $name, int $maxAttempts): Limit
+    {
+        $organization = $request->route('organization') ?? $request->route('current_organization');
+        $organizationIdentifier = match (true) {
+            $organization instanceof Organization => $organization->public_id,
+            is_string($organization) => $organization,
+            default => 'unscoped',
+        };
+        $actor = $request->user();
+        $actorIdentifier = $actor === null ? $request->ip() : (string) $actor->getAuthIdentifier();
+
+        return Limit::perMinute($maxAttempts)->by(implode('|', [
+            $name,
+            $organizationIdentifier,
+            $actorIdentifier,
+        ]));
     }
 }

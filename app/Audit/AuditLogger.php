@@ -23,9 +23,10 @@ class AuditLogger
         ?array $before = null,
         ?array $after = null,
     ): void {
-        DB::table('audit_events')->insert([
+        $attributes = [
             'organization_id' => $organization?->id,
             'actor_user_id' => $actor?->id,
+            'impersonator_user_id' => $this->impersonatorUserId(),
             'correlation_id' => Context::get('correlation_id', fn (): string => (string) Str::uuid()),
             'action' => $action,
             'subject_type' => $subject?->getMorphClass(),
@@ -35,7 +36,18 @@ class AuditLogger
             'ip_address' => request()->ip(),
             'user_agent' => request()->userAgent(),
             'occurred_at' => now(),
-        ]);
+        ];
+
+        if ($organization === null && DB::getDriverName() === 'pgsql') {
+            DB::transaction(function () use ($attributes): void {
+                DB::statement("select set_config('app.allow_global_audit_event_insert', 'true', true)");
+                DB::table('audit_events')->insert($attributes);
+            });
+
+            return;
+        }
+
+        DB::table('audit_events')->insert($attributes);
     }
 
     private function subjectIdentifier(?Model $subject): ?string
@@ -49,5 +61,12 @@ class AuditLogger
         return is_string($publicId) && $publicId !== ''
             ? $publicId
             : (string) $subject->getRouteKey();
+    }
+
+    private function impersonatorUserId(): ?int
+    {
+        $impersonatorUserId = Context::get('impersonator_user_id');
+
+        return is_int($impersonatorUserId) ? $impersonatorUserId : null;
     }
 }

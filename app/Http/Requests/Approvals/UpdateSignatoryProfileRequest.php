@@ -2,11 +2,9 @@
 
 namespace App\Http\Requests\Approvals;
 
-use App\Approvals\ApprovalWorkflowAuthorizer;
 use App\Models\Organization;
 use App\Models\SignatoryProfile;
 use App\Models\User;
-use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 
@@ -28,13 +26,7 @@ class UpdateSignatoryProfileRequest extends FormRequest
             return false;
         }
 
-        try {
-            app(ApprovalWorkflowAuthorizer::class)->authorize($organization, $actor);
-        } catch (AuthorizationException) {
-            return false;
-        }
-
-        return true;
+        return $actor->can('update', $profile);
     }
 
     /**
@@ -57,6 +49,7 @@ class UpdateSignatoryProfileRequest extends FormRequest
                 'mimes:jpg,jpeg,png,webp',
                 'mimetypes:image/jpeg,image/png,image/webp',
                 'max:2048',
+                'dimensions:max_width=4096,max_height=4096',
             ],
         ];
     }

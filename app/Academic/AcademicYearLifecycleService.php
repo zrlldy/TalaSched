@@ -2,11 +2,13 @@
 
 namespace App\Academic;
 
+use App\Audit\AuditLogger;
 use App\Enums\AcademicPeriodKind;
 use App\Enums\AcademicYearStatus;
 use App\Models\AcademicPeriod;
 use App\Models\AcademicYear;
 use App\Models\Organization;
+use App\Models\User;
 use App\Tenancy\TenantContext;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\DB;
@@ -14,7 +16,10 @@ use Illuminate\Validation\ValidationException;
 
 class AcademicYearLifecycleService
 {
-    public function __construct(private TenantContext $tenantContext) {}
+    public function __construct(
+        private TenantContext $tenantContext,
+        private AuditLogger $auditLogger,
+    ) {}
 
     /**
      * Create a draft academic year for an organization.
@@ -24,18 +29,29 @@ class AcademicYearLifecycleService
         string $name,
         CarbonInterface $startsOn,
         CarbonInterface $endsOn,
+        ?User $actor = null,
     ): AcademicYear {
-        return $this->tenantContext->run($organization, function () use ($organization, $name, $startsOn, $endsOn): AcademicYear {
-            return DB::transaction(function () use ($organization, $name, $startsOn, $endsOn): AcademicYear {
+        return $this->tenantContext->run($organization, function () use ($organization, $name, $startsOn, $endsOn, $actor): AcademicYear {
+            return DB::transaction(function () use ($organization, $name, $startsOn, $endsOn, $actor): AcademicYear {
                 $this->lockOrganization($organization);
 
-                return AcademicYear::query()->create([
+                $academicYear = AcademicYear::query()->create([
                     'organization_id' => $organization->getKey(),
                     'name' => $name,
                     'starts_on' => $startsOn,
                     'ends_on' => $endsOn,
                     'status' => AcademicYearStatus::Draft,
                 ]);
+
+                $this->auditLogger->record(
+                    action: 'academic_year.created',
+                    organization: $organization,
+                    actor: $actor,
+                    subject: $academicYear,
+                    after: $this->yearSnapshot($academicYear),
+                );
+
+                return $academicYear;
             }, attempts: 3);
         });
     }
@@ -51,15 +67,16 @@ class AcademicYearLifecycleService
         int $sequence,
         CarbonInterface $startsOn,
         CarbonInterface $endsOn,
+        ?User $actor = null,
     ): AcademicPeriod {
-        return $this->tenantContext->run($organization, function () use ($organization, $academicYear, $name, $kind, $sequence, $startsOn, $endsOn): AcademicPeriod {
-            return DB::transaction(function () use ($organization, $academicYear, $name, $kind, $sequence, $startsOn, $endsOn): AcademicPeriod {
+        return $this->tenantContext->run($organization, function () use ($organization, $academicYear, $name, $kind, $sequence, $startsOn, $endsOn, $actor): AcademicPeriod {
+            return DB::transaction(function () use ($organization, $academicYear, $name, $kind, $sequence, $startsOn, $endsOn, $actor): AcademicPeriod {
                 $this->lockOrganization($organization);
                 $lockedYear = $this->lockYear($organization, $academicYear);
                 $this->assertDraft($lockedYear);
                 $this->assertNoOverlappingPeriod($organization, $lockedYear, $startsOn, $endsOn);
 
-                return AcademicPeriod::query()->create([
+                $academicPeriod = AcademicPeriod::query()->create([
                     'organization_id' => $organization->getKey(),
                     'academic_year_id' => $lockedYear->getKey(),
                     'name' => $name,
@@ -68,6 +85,16 @@ class AcademicYearLifecycleService
                     'starts_on' => $startsOn,
                     'ends_on' => $endsOn,
                 ]);
+
+                $this->auditLogger->record(
+                    action: 'academic_period.created',
+                    organization: $organization,
+                    actor: $actor,
+                    subject: $academicPeriod,
+                    after: $this->periodSnapshot($academicPeriod),
+                );
+
+                return $academicPeriod;
             }, attempts: 3);
         });
     }
@@ -75,10 +102,10 @@ class AcademicYearLifecycleService
     /**
      * Activate a draft year once its configurable periods are complete.
      */
-    public function activate(Organization $organization, AcademicYear $academicYear): AcademicYear
+    public function activate(Organization $organization, AcademicYear $academicYear, ?User $actor = null): AcademicYear
     {
-        return $this->tenantContext->run($organization, function () use ($organization, $academicYear): AcademicYear {
-            return DB::transaction(function () use ($organization, $academicYear): AcademicYear {
+        return $this->tenantContext->run($organization, function () use ($organization, $academicYear, $actor): AcademicYear {
+            return DB::transaction(function () use ($organization, $academicYear, $actor): AcademicYear {
                 $this->lockOrganization($organization);
                 $lockedYear = $this->lockYear($organization, $academicYear);
 
@@ -123,9 +150,20 @@ class AcademicYearLifecycleService
                     ]);
                 }
 
+                $before = $this->yearSnapshot($lockedYear);
                 $lockedYear->update(['status' => AcademicYearStatus::Active]);
+                $lockedYear->refresh();
 
-                return $lockedYear->fresh();
+                $this->auditLogger->record(
+                    action: 'academic_year.activated',
+                    organization: $organization,
+                    actor: $actor,
+                    subject: $lockedYear,
+                    before: $before,
+                    after: $this->yearSnapshot($lockedYear),
+                );
+
+                return $lockedYear;
             }, attempts: 3);
         });
     }
@@ -133,10 +171,10 @@ class AcademicYearLifecycleService
     /**
      * Close an active academic year without changing its historical periods.
      */
-    public function close(Organization $organization, AcademicYear $academicYear): AcademicYear
+    public function close(Organization $organization, AcademicYear $academicYear, ?User $actor = null): AcademicYear
     {
-        return $this->tenantContext->run($organization, function () use ($organization, $academicYear): AcademicYear {
-            return DB::transaction(function () use ($organization, $academicYear): AcademicYear {
+        return $this->tenantContext->run($organization, function () use ($organization, $academicYear, $actor): AcademicYear {
+            return DB::transaction(function () use ($organization, $academicYear, $actor): AcademicYear {
                 $this->lockOrganization($organization);
                 $lockedYear = $this->lockYear($organization, $academicYear);
 
@@ -150,9 +188,20 @@ class AcademicYearLifecycleService
                     ]);
                 }
 
+                $before = $this->yearSnapshot($lockedYear);
                 $lockedYear->update(['status' => AcademicYearStatus::Closed]);
+                $lockedYear->refresh();
 
-                return $lockedYear->fresh();
+                $this->auditLogger->record(
+                    action: 'academic_year.closed',
+                    organization: $organization,
+                    actor: $actor,
+                    subject: $lockedYear,
+                    before: $before,
+                    after: $this->yearSnapshot($lockedYear),
+                );
+
+                return $lockedYear;
             }, attempts: 3);
         });
     }
@@ -203,5 +252,34 @@ class AcademicYearLifecycleService
                 'periods' => __('Academic periods in one year cannot overlap.'),
             ]);
         }
+    }
+
+    /**
+     * @return array{id: string, name: string, starts_on: string, ends_on: string, status: string}
+     */
+    private function yearSnapshot(AcademicYear $academicYear): array
+    {
+        return [
+            'id' => $academicYear->public_id,
+            'name' => $academicYear->name,
+            'starts_on' => $academicYear->starts_on->toDateString(),
+            'ends_on' => $academicYear->ends_on->toDateString(),
+            'status' => $academicYear->status->value,
+        ];
+    }
+
+    /**
+     * @return array{id: string, name: string, kind: string, sequence: int, starts_on: string, ends_on: string}
+     */
+    private function periodSnapshot(AcademicPeriod $academicPeriod): array
+    {
+        return [
+            'id' => $academicPeriod->public_id,
+            'name' => $academicPeriod->name,
+            'kind' => $academicPeriod->kind->value,
+            'sequence' => $academicPeriod->sequence,
+            'starts_on' => $academicPeriod->starts_on->toDateString(),
+            'ends_on' => $academicPeriod->ends_on->toDateString(),
+        ];
     }
 }

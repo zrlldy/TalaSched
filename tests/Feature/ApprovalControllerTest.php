@@ -13,6 +13,7 @@ use App\Models\User;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use Inertia\Testing\AssertableInertia as Assert;
 
@@ -131,7 +132,7 @@ test('the approval inbox renders a timeline and records a decision by timetable 
     expect(DB::table('approval_actions')->where('idempotency_key', $idempotencyKey)->count())->toBe(1);
 });
 
-test('the inbox keeps the immutable workflow version selected at submission time', function (): void {
+test('the inbox keeps the immutable workflow version and approver eligibility selected at submission time', function (): void {
     $year = AcademicYear::factory()->forOrganization($this->organization)->create(['status' => 'active']);
     $period = AcademicPeriod::factory()->forAcademicYear($year)->create();
     $timetable = Timetable::factory()->create([
@@ -171,9 +172,9 @@ test('the inbox keeps the immutable workflow version selected at submission time
         [[
             'sequence' => 1,
             'label' => 'Replacement review',
-            'approver_selector_type' => 'permission',
-            'required_permission' => OrganizationPermission::ManageScheduling->value,
-            'role_codes' => [],
+            'approver_selector_type' => 'role',
+            'required_permission' => null,
+            'role_codes' => [OrganizationRole::Member->value],
             'minimum_approvals' => 1,
             'allow_self_approval' => false,
             'signatory_slot' => 'registrar',
@@ -187,6 +188,19 @@ test('the inbox keeps the immutable workflow version selected at submission time
         ->component('approvals/Inbox')
         ->where('instances.0.workflow_version', 1)
         ->where('instances.0.steps.0.label', 'Original review'));
+
+    $this->actingAs($approver)->post(route('approvals.decide', [
+        'current_organization' => $this->organization->slug,
+        'timetable_version' => $version->public_id,
+    ]), [
+        'decision' => 'approve',
+        'idempotency_key' => (string) Str::uuid(),
+    ])->assertRedirect(route('approvals.inbox', [
+        'current_organization' => $this->organization->slug,
+    ]));
+
+    expect(DB::table('approval_instances')->where('timetable_version_id', $version->id)->value('status'))
+        ->toBe('approved');
 });
 
 test('signatory administration stores private assets and exposes only safe profile attributes', function (): void {
@@ -215,8 +229,76 @@ test('signatory administration stores private assets and exposes only safe profi
         ->component('approvals/Signatories')
         ->where('profiles.0.id', $profile->public_id)
         ->where('profiles.0.has_signature', true)
+        ->has('profiles.0.signature_download_url')
         ->missing('profiles.0.signature_path')
         ->where('members.0.id', $membership->public_id));
+});
+
+test('signatory administration rejects signature images above the pixel dimension limit', function (): void {
+    $membership = $this->organization->memberships()->where('user_id', $this->owner->id)->firstOrFail();
+
+    $this->actingAs($this->owner)->post(route('approvals.signatories.store', [
+        'current_organization' => $this->organization->slug,
+    ]), [
+        'membership_id' => $membership->public_id,
+        'name' => 'Registrar Name',
+        'position' => 'Registrar',
+        'signature_image' => UploadedFile::fake()->image('oversized.png', 4097, 1),
+    ])->assertSessionHasErrors('signature_image');
+
+    expect($this->organization->signatoryProfiles()->exists())->toBeFalse();
+});
+
+test('signatory signature downloads require a current short-lived authorized link', function (): void {
+    Storage::fake('signatures');
+    $membership = $this->organization->memberships()->where('user_id', $this->owner->id)->firstOrFail();
+
+    $this->actingAs($this->owner)->post(route('approvals.signatories.store', [
+        'current_organization' => $this->organization->slug,
+    ]), [
+        'membership_id' => $membership->public_id,
+        'name' => 'Registrar Name',
+        'position' => 'Registrar',
+        'signature_image' => UploadedFile::fake()->image('signature.png'),
+    ])->assertRedirect();
+
+    $profile = $this->organization->signatoryProfiles()->firstOrFail();
+    $signatureUrl = URL::temporarySignedRoute('approvals.signatories.signature.download', now()->addMinutes(5), [
+        'current_organization' => $this->organization->slug,
+        'signatory_profile' => $profile->public_id,
+    ]);
+
+    $this->actingAs($this->owner)->get($signatureUrl)
+        ->assertDownload('signature-'.$profile->public_id.'.png');
+
+    $unauthorizedMember = User::factory()->create();
+    $this->organization->members()->attach($unauthorizedMember, ['role' => OrganizationRole::Member]);
+
+    $this->actingAs($unauthorizedMember)->get($signatureUrl)->assertForbidden();
+
+    $foreignOwner = User::factory()->withOwnedOrganization()->create();
+    $foreignOrganization = $foreignOwner->currentOrganization;
+    $foreignOrganizationUrl = URL::temporarySignedRoute('approvals.signatories.signature.download', now()->addMinutes(5), [
+        'current_organization' => $foreignOrganization->slug,
+        'signatory_profile' => $profile->public_id,
+    ]);
+
+    $this->actingAs($foreignOwner)->get($foreignOrganizationUrl)->assertNotFound();
+
+    $expiredUrl = URL::temporarySignedRoute('approvals.signatories.signature.download', now()->subMinute(), [
+        'current_organization' => $this->organization->slug,
+        'signatory_profile' => $profile->public_id,
+    ]);
+
+    $this->actingAs($this->owner)->get($expiredUrl)->assertForbidden();
+});
+
+test('private artifact disks are not public or framework-served', function (): void {
+    foreach (['signatures', 'private'] as $disk) {
+        expect(config("filesystems.disks.{$disk}.visibility"))->toBe('private')
+            ->and(config("filesystems.disks.{$disk}.serve"))->toBeFalse()
+            ->and(config("filesystems.disks.{$disk}.throw"))->toBeTrue();
+    }
 });
 
 test('workflow and signatory administration require the approval management capability', function (): void {

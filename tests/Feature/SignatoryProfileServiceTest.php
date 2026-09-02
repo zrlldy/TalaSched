@@ -107,6 +107,20 @@ test('signatory profiles reject invalid validity windows and foreign references'
     ))->toThrow(ValidationException::class, 'image');
 });
 
+test('signatory profiles reject signature images above the pixel dimension limit', function (): void {
+    expect(fn () => app(SignatoryProfileService::class)->create(
+        $this->organization,
+        $this->owner,
+        $this->signatory,
+        'Registrar',
+        'Registrar',
+        null,
+        null,
+        null,
+        UploadedFile::fake()->image('oversized.png', 4097, 1),
+    ))->toThrow(ValidationException::class, 'dimensions');
+});
+
 test('signatory profile updates replace the private asset and preserve the old snapshot data', function (): void {
     $firstImage = UploadedFile::fake()->image('first.png', 80, 30);
     $profile = app(SignatoryProfileService::class)->create(

@@ -109,6 +109,38 @@ test('authorization decisions use normalized assignments instead of the legacy r
     expect($member->fresh()->hasOrganizationPermission($organization, OrganizationPermission::UpdateOrganization))->toBeFalse();
 });
 
+test('permission resolution reuses the lifecycle cache without further queries', function (): void {
+    $owner = User::factory()->withOwnedOrganization()->create();
+    $organization = $owner->currentOrganization;
+    $resolver = app(OrganizationPermissionResolver::class);
+
+    $resolver->flush();
+    DB::enableQueryLog();
+
+    try {
+        $firstDecision = $resolver->hasPermission(
+            $owner,
+            $organization,
+            OrganizationPermission::UpdateOrganization,
+        );
+
+        DB::flushQueryLog();
+
+        $secondDecision = $resolver->hasPermission(
+            $owner,
+            $organization,
+            OrganizationPermission::UpdateOrganization,
+        );
+        $cachedQueries = DB::getQueryLog();
+    } finally {
+        DB::disableQueryLog();
+    }
+
+    expect($firstDecision)->toBeTrue()
+        ->and($secondDecision)->toBeTrue()
+        ->and($cachedQueries)->toBeEmpty();
+});
+
 test('scoped role permissions follow academic unit descendants only', function () {
     $organization = Organization::factory()->create();
     $otherOrganization = Organization::factory()->create();

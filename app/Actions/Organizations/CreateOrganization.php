@@ -2,17 +2,21 @@
 
 namespace App\Actions\Organizations;
 
+use App\Audit\AuditLogger;
 use App\Enums\OrganizationRole;
 use App\Models\Organization;
 use App\Models\User;
 use App\Subscriptions\ProvisionOrganizationSubscription;
+use App\Tenancy\TenantContext;
 use Illuminate\Support\Facades\DB;
 
 class CreateOrganization
 {
     public function __construct(
+        private AuditLogger $auditLogger,
         private ProvisionOrganizationAuthorization $provisionAuthorization,
         private ProvisionOrganizationSubscription $provisionSubscription,
+        private TenantContext $tenantContext,
     ) {}
 
     /**
@@ -31,10 +35,23 @@ class CreateOrganization
                 'role' => OrganizationRole::Owner,
             ]);
 
-            $this->provisionSubscription->handle($organization);
-            $this->provisionAuthorization->handle($organization);
+            $this->tenantContext->run($organization, function (Organization $organization) use ($user): void {
+                $this->provisionSubscription->handle($organization, $user);
+                $this->provisionAuthorization->handle($organization);
 
-            $user->switchOrganization($organization);
+                $this->auditLogger->record(
+                    action: 'organization.created',
+                    organization: $organization,
+                    actor: $user,
+                    subject: $organization,
+                    after: [
+                        'name' => $organization->name,
+                        'slug' => $organization->slug,
+                    ],
+                );
+
+                $user->switchOrganization($organization);
+            });
 
             return $organization;
         });

@@ -13,6 +13,7 @@ import {
     TooltipProvider,
     TooltipTrigger,
 } from '@/components/ui/tooltip';
+import WorkspaceState from '@/components/WorkspaceState.vue';
 import { edit, index } from '@/routes/organizations';
 import type { DashboardInvitation, Organization } from '@/types';
 
@@ -148,12 +149,12 @@ defineOptions({
                 </TooltipProvider>
             </div>
 
-            <p
+            <WorkspaceState
                 v-if="organizations.length === 0"
-                class="py-8 text-center text-muted-foreground"
-            >
-                You don't belong to any organizations yet.
-            </p>
+                variant="empty"
+                title="No workspaces yet"
+                description="Create an organization to begin configuring its academic calendar, resources, and timetable."
+            />
         </div>
     </div>
 

@@ -102,14 +102,18 @@ test('offering service snapshots subject components and manages eligible instruc
         ->and(DB::table('offering_component_features')
             ->where('offering_component_id', $snapshotLecture->getKey())
             ->value('feature_id'))->toBe($feature->getKey())
-        ->and($primaryAssignments)->toBe([0, 1]);
+        ->and($primaryAssignments)->toBe([0, 1])
+        ->and(DB::table('audit_events')->where('action', 'subject_offering.created')->count())->toBe(1)
+        ->and(DB::table('audit_events')->where('action', 'subject_offering.instructor_assigned')->count())->toBe(2)
+        ->and(DB::table('audit_events')->where('action', 'subject_offering.status_updated')->count())->toBe(1);
 
     $offerings->removeInstructor($organization, $firstComponent, $secondFaculty);
 
     expect(DB::table('offering_instructors')
         ->where('offering_component_id', $firstComponent->getKey())
         ->where('faculty_profile_id', $secondFaculty->getKey())
-        ->exists())->toBeFalse();
+        ->exists())->toBeFalse()
+        ->and(DB::table('audit_events')->where('action', 'subject_offering.instructor_removed')->count())->toBe(1);
 });
 
 test('offering service rejects mismatched academic years and foreign instructors', function (): void {

@@ -6,6 +6,7 @@ import {
     ClipboardCheck,
     LayoutGrid,
     PanelsTopLeft,
+    ReceiptText,
 } from '@lucide/vue';
 import { computed } from 'vue';
 import AppLogo from '@/components/AppLogo.vue';
@@ -27,7 +28,8 @@ import { inbox as approvalInbox } from '@/routes/approvals';
 import { index as organizations } from '@/routes/organizations';
 import { setup as resourceSetup } from '@/routes/resources';
 import { show as timetableShow } from '@/routes/scheduling/timetables';
-import type { NavItem } from '@/types';
+import { show as subscriptionShow } from '@/routes/subscriptions';
+import type { NavGroup, NavItem } from '@/types';
 
 const page = usePage();
 
@@ -47,42 +49,88 @@ const timetableUrl = computed(() => {
         .url;
 });
 
-const mainNavItems = computed<NavItem[]>(() => {
-    const items: NavItem[] = [
+const mainNavGroups = computed<NavGroup[]>(() => {
+    const groups: NavGroup[] = [
         {
-            title: 'Dashboard',
-            href: dashboardUrl.value,
-            icon: LayoutGrid,
+            title: 'Workspace',
+            items: [
+                {
+                    title: 'Dashboard',
+                    href: dashboardUrl.value,
+                    icon: LayoutGrid,
+                },
+            ],
         },
     ];
 
     if (page.props.currentOrganization) {
+        const setupItems: NavItem[] = [
+            {
+                title: 'Academic setup',
+                href: academicSetup(page.props.currentOrganization.slug).url,
+                icon: CalendarRange,
+            },
+        ];
+
+        groups.push({
+            title: 'Setup',
+            items: setupItems,
+        });
+
+        groups.push({
+            title: 'Resources',
+            items: [
+                {
+                    title: 'Resources & catalog',
+                    href: resourceSetup(page.props.currentOrganization.slug)
+                        .url,
+                    icon: PanelsTopLeft,
+                },
+            ],
+        });
+
         if (timetableUrl.value !== null) {
-            items.push({
-                title: 'Timetable',
-                href: timetableUrl.value,
-                icon: CalendarClock,
+            groups.push({
+                title: 'Scheduling',
+                items: [
+                    {
+                        title: 'Timetable',
+                        href: timetableUrl.value,
+                        icon: CalendarClock,
+                    },
+                ],
             });
         }
 
-        items.push({
-            title: 'Academic setup',
-            href: academicSetup(page.props.currentOrganization.slug).url,
-            icon: CalendarRange,
-        });
-        items.push({
-            title: 'Resources & catalog',
-            href: resourceSetup(page.props.currentOrganization.slug).url,
-            icon: PanelsTopLeft,
-        });
-        items.push({
+        groups.push({
             title: 'Approvals',
-            href: approvalInbox(page.props.currentOrganization.slug).url,
-            icon: ClipboardCheck,
+            items: [
+                {
+                    title: 'Approval inbox',
+                    href: approvalInbox(page.props.currentOrganization.slug)
+                        .url,
+                    icon: ClipboardCheck,
+                },
+            ],
         });
+
+        if (page.props.canManageSubscription) {
+            groups.push({
+                title: 'Billing',
+                items: [
+                    {
+                        title: 'Plan & usage',
+                        href: subscriptionShow(
+                            page.props.currentOrganization.slug,
+                        ).url,
+                        icon: ReceiptText,
+                    },
+                ],
+            });
+        }
     }
 
-    return items;
+    return groups;
 });
 </script>
 
@@ -106,7 +154,7 @@ const mainNavItems = computed<NavItem[]>(() => {
         </SidebarHeader>
 
         <SidebarContent aria-label="Workspace navigation">
-            <NavMain :items="mainNavItems" />
+            <NavMain :groups="mainNavGroups" />
         </SidebarContent>
 
         <SidebarFooter>

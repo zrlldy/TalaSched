@@ -37,6 +37,12 @@ test('entitled administrators can create and update custom roles', function (): 
             OrganizationPermission::ManageAcademic->value,
             OrganizationPermission::ManageScheduling->value,
         ]);
+    expect(DB::table('audit_events')
+        ->where('action', 'organization.role_created')
+        ->where('organization_id', $organization->id)
+        ->where('actor_user_id', $owner->id)
+        ->where('subject_id', $role->code)
+        ->exists())->toBeTrue();
 
     $response = $this
         ->actingAs($owner)
@@ -50,6 +56,24 @@ test('entitled administrators can create and update custom roles', function (): 
     expect($role->fresh()->name)->toBe('Academic coordinator')
         ->and($role->fresh()->permissions()->pluck('code')->all())
         ->toEqual([OrganizationPermission::ManageAcademic->value]);
+    expect(DB::table('audit_events')
+        ->where('action', 'organization.role_updated')
+        ->where('organization_id', $organization->id)
+        ->where('actor_user_id', $owner->id)
+        ->where('subject_id', $role->code)
+        ->exists())->toBeTrue();
+
+    $this
+        ->actingAs($owner)
+        ->delete(route('organizations.roles.destroy', [$organization, $role]))
+        ->assertRedirect(route('organizations.edit', $organization));
+
+    expect(DB::table('audit_events')
+        ->where('action', 'organization.role_deleted')
+        ->where('organization_id', $organization->id)
+        ->where('actor_user_id', $owner->id)
+        ->where('subject_id', $role->code)
+        ->exists())->toBeTrue();
 });
 
 test('custom role endpoints require both the capability and organization permission', function (): void {

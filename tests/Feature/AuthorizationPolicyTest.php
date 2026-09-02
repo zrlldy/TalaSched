@@ -16,6 +16,7 @@ use App\Models\ResourceAvailabilityRule;
 use App\Models\Room;
 use App\Models\ScheduleEntry;
 use App\Models\SchedulingResource;
+use App\Models\SignatoryProfile;
 use App\Models\StudentGroup;
 use App\Models\Subject;
 use App\Models\SubjectOffering;
@@ -115,4 +116,30 @@ test('timetable lifecycle actions require the scheduling policy', function () {
         ->and(Gate::forUser($member)->allows('clone', $version))->toBeFalse()
         ->and(Gate::forUser($member)->allows('publish', $version))->toBeFalse()
         ->and(Gate::forUser($member)->allows('rollback', $version))->toBeFalse();
+});
+
+test('signatory profile policies require approval workflow management', function () {
+    $owner = User::factory()->withOwnedOrganization()->create();
+    $member = User::factory()->create();
+    $foreignOwner = User::factory()->withOwnedOrganization()->create();
+    $organization = $owner->currentOrganization;
+    $organization->members()->attach($member, ['role' => OrganizationRole::Member]);
+    $profile = SignatoryProfile::factory()->create([
+        'organization_id' => $organization->id,
+        'user_id' => $owner->id,
+    ]);
+
+    expect(Gate::forUser($owner)->allows('viewAny', [SignatoryProfile::class, $organization]))->toBeFalse()
+        ->and(Gate::forUser($owner)->allows('create', [SignatoryProfile::class, $organization]))->toBeFalse();
+
+    grantApprovalWorkflowsEntitlement($organization);
+
+    expect(Gate::forUser($owner)->allows('viewAny', [SignatoryProfile::class, $organization]))->toBeTrue()
+        ->and(Gate::forUser($owner)->allows('create', [SignatoryProfile::class, $organization]))->toBeTrue()
+        ->and(Gate::forUser($owner)->allows('view', $profile))->toBeTrue()
+        ->and(Gate::forUser($owner)->allows('update', $profile))->toBeTrue()
+        ->and(Gate::forUser($owner)->allows('delete', $profile))->toBeTrue()
+        ->and(Gate::forUser($member)->allows('viewAny', [SignatoryProfile::class, $organization]))->toBeFalse()
+        ->and(Gate::forUser($member)->allows('update', $profile))->toBeFalse()
+        ->and(Gate::forUser($foreignOwner)->allows('view', $profile))->toBeFalse();
 });

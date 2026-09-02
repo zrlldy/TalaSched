@@ -406,6 +406,25 @@ test('overlapping resources return structured hard constraint issues', function 
 
     $response->assertUnprocessable()
         ->assertJsonPath('error.code', 'schedule_conflict')
+        ->assertJsonStructure([
+            'error' => [
+                'code',
+                'message',
+                'issues' => [
+                    '*' => [
+                        'code',
+                        'severity',
+                        'field',
+                        'rule_code',
+                        'message',
+                        'details',
+                        'resource',
+                        'conflicting_entry_id',
+                    ],
+                ],
+            ],
+            'meta' => ['correlation_id'],
+        ])
         ->assertJsonFragment(['code' => 'resource_overlap', 'severity' => 'hard'])
         ->assertJsonFragment([
             'resource' => ['id' => $this->facultyResource->public_id, 'name' => 'Teacher A'],
@@ -447,6 +466,43 @@ test('published versions and off-grid times cannot be edited', function () {
         ->assertJsonFragment(['code' => 'version_not_editable'])
         ->assertJsonFragment(['code' => 'invalid_granularity']);
 });
+
+test('schedule validation rejects non-increasing local-time windows', function (
+    int $startsAt,
+    int $endsAt,
+): void {
+    $this->actingAs($this->user)
+        ->postJson(
+            route('scheduling.entries.validate', $this->organization),
+            validSchedulePayload($this, $startsAt, $endsAt),
+        )
+        ->assertUnprocessable()
+        ->assertJsonPath('error.code', 'validation_failed')
+        ->assertJsonFragment(['field' => 'ends_at_minute']);
+})->with([
+    'same-minute window' => [480, 480],
+    'overnight window' => [1380, 60],
+]);
+
+test('schedule validation reports off-grid local-time windows', function (
+    int $startsAt,
+    int $endsAt,
+): void {
+    $this->actingAs($this->user)
+        ->postJson(
+            route('scheduling.entries.validate', $this->organization),
+            validSchedulePayload($this, $startsAt, $endsAt),
+        )
+        ->assertSuccessful()
+        ->assertJsonPath('data.attributes.valid', false)
+        ->assertJsonFragment([
+            'code' => 'invalid_granularity',
+            'severity' => ConstraintSeverity::Hard->value,
+        ]);
+})->with([
+    'off-grid start' => [485, 570],
+    'off-grid end' => [480, 575],
+]);
 
 test('resources from another organization are rejected before scheduling', function () {
     $otherOrganization = Organization::factory()->create();
@@ -764,6 +820,30 @@ test('hard available windows reject schedules outside the selected resource wind
         ->postJson(route('scheduling.entries.validate', $this->organization), validSchedulePayload($this))
         ->assertSuccessful()
         ->assertJsonPath('data.attributes.valid', false)
+        ->assertJsonStructure([
+            'data' => [
+                'type',
+                'attributes' => [
+                    'valid',
+                    'issues' => [
+                        '*' => [
+                            'code',
+                            'severity',
+                            'field',
+                            'rule_code',
+                            'message',
+                            'details',
+                            'resource',
+                            'conflicting_entry_id',
+                        ],
+                    ],
+                    'hard_issues',
+                    'warnings',
+                    'score',
+                ],
+            ],
+            'meta' => ['correlation_id'],
+        ])
         ->assertJsonFragment(['code' => 'resource_unavailable', 'severity' => 'hard']);
 });
 

@@ -2,6 +2,7 @@
 
 namespace App\Catalog;
 
+use App\Audit\AuditLogger;
 use App\Enums\ResourceType;
 use App\Enums\SubjectOfferingStatus;
 use App\Models\AcademicPeriod;
@@ -13,13 +14,17 @@ use App\Models\StudentGroup;
 use App\Models\Subject;
 use App\Models\SubjectComponent;
 use App\Models\SubjectOffering;
+use App\Models\User;
 use App\Tenancy\TenantContext;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class SubjectOfferingService
 {
-    public function __construct(private TenantContext $tenantContext) {}
+    public function __construct(
+        private TenantContext $tenantContext,
+        private AuditLogger $auditLogger,
+    ) {}
 
     public function createOffering(
         Organization $organization,
@@ -30,12 +35,13 @@ class SubjectOfferingService
         int $expectedEnrollment = 0,
         SubjectOfferingStatus $status = SubjectOfferingStatus::Draft,
         ?AcademicUnit $owningAcademicUnit = null,
+        ?User $actor = null,
     ): SubjectOffering {
         $this->assertEnrollment($expectedEnrollment);
         $this->assertCode($code);
 
-        return $this->tenantContext->run($organization, function () use ($organization, $academicPeriod, $subject, $studentGroup, $code, $expectedEnrollment, $status, $owningAcademicUnit): SubjectOffering {
-            return DB::transaction(function () use ($organization, $academicPeriod, $subject, $studentGroup, $code, $expectedEnrollment, $status, $owningAcademicUnit): SubjectOffering {
+        return $this->tenantContext->run($organization, function () use ($organization, $academicPeriod, $subject, $studentGroup, $code, $expectedEnrollment, $status, $owningAcademicUnit, $actor): SubjectOffering {
+            return DB::transaction(function () use ($organization, $academicPeriod, $subject, $studentGroup, $code, $expectedEnrollment, $status, $owningAcademicUnit, $actor): SubjectOffering {
                 $this->lockOrganization($organization);
                 $period = $this->lockPeriod($organization, $academicPeriod);
                 $lockedSubject = $this->lockSubject($organization, $subject);
@@ -78,7 +84,17 @@ class SubjectOfferingService
                     $this->createSnapshot($organization, $offering, $component);
                 }
 
-                return $offering->fresh(['academicPeriod', 'subject', 'studentGroup', 'components']);
+                $offering = $offering->fresh(['academicPeriod', 'subject', 'studentGroup', 'components']);
+
+                $this->auditLogger->record(
+                    action: 'subject_offering.created',
+                    organization: $organization,
+                    actor: $actor,
+                    subject: $offering,
+                    after: $this->offeringSnapshot($offering),
+                );
+
+                return $offering;
             }, attempts: 3);
         });
     }
@@ -87,9 +103,10 @@ class SubjectOfferingService
         Organization $organization,
         SubjectOffering $offering,
         SubjectComponent $subjectComponent,
+        ?User $actor = null,
     ): OfferingComponent {
-        return $this->tenantContext->run($organization, function () use ($organization, $offering, $subjectComponent): OfferingComponent {
-            return DB::transaction(function () use ($organization, $offering, $subjectComponent): OfferingComponent {
+        return $this->tenantContext->run($organization, function () use ($organization, $offering, $subjectComponent, $actor): OfferingComponent {
+            return DB::transaction(function () use ($organization, $offering, $subjectComponent, $actor): OfferingComponent {
                 $this->lockOrganization($organization);
                 $lockedOffering = $this->lockOffering($organization, $offering);
                 $lockedSubjectComponent = SubjectComponent::query()
@@ -98,7 +115,17 @@ class SubjectOfferingService
                     ->lockForUpdate()
                     ->firstOrFail();
 
-                return $this->createSnapshot($organization, $lockedOffering, $lockedSubjectComponent);
+                $component = $this->createSnapshot($organization, $lockedOffering, $lockedSubjectComponent);
+
+                $this->auditLogger->record(
+                    action: 'subject_offering.component_snapshot_created',
+                    organization: $organization,
+                    actor: $actor,
+                    subject: $lockedOffering,
+                    after: $this->componentSnapshot($component),
+                );
+
+                return $component;
             }, attempts: 3);
         });
     }
@@ -109,11 +136,12 @@ class SubjectOfferingService
         FacultyProfile $faculty,
         int $loadPercentage = 100,
         bool $isPrimary = false,
+        ?User $actor = null,
     ): OfferingComponent {
         $this->assertLoadPercentage($loadPercentage);
 
-        return $this->tenantContext->run($organization, function () use ($organization, $component, $faculty, $loadPercentage, $isPrimary): OfferingComponent {
-            return DB::transaction(function () use ($organization, $component, $faculty, $loadPercentage, $isPrimary): OfferingComponent {
+        return $this->tenantContext->run($organization, function () use ($organization, $component, $faculty, $loadPercentage, $isPrimary, $actor): OfferingComponent {
+            return DB::transaction(function () use ($organization, $component, $faculty, $loadPercentage, $isPrimary, $actor): OfferingComponent {
                 $this->lockOrganization($organization);
                 $lockedComponent = $this->lockComponent($organization, $component);
                 $lockedFaculty = FacultyProfile::query()
@@ -125,6 +153,12 @@ class SubjectOfferingService
                     })
                     ->lockForUpdate()
                     ->firstOrFail();
+
+                $before = DB::table('offering_instructors')
+                    ->where('organization_id', $organization->getKey())
+                    ->where('offering_component_id', $lockedComponent->getKey())
+                    ->where('faculty_profile_id', $lockedFaculty->getKey())
+                    ->first(['load_percentage', 'is_primary']);
 
                 if ($isPrimary) {
                     DB::table('offering_instructors')
@@ -145,6 +179,15 @@ class SubjectOfferingService
                     ],
                 );
 
+                $this->auditLogger->record(
+                    action: 'subject_offering.instructor_assigned',
+                    organization: $organization,
+                    actor: $actor,
+                    subject: $lockedComponent,
+                    before: $before === null ? null : ['faculty_profile_id' => $lockedFaculty->public_id, 'load_percentage' => (int) $before->load_percentage, 'is_primary' => (bool) $before->is_primary],
+                    after: ['faculty_profile_id' => $lockedFaculty->public_id, 'load_percentage' => $loadPercentage, 'is_primary' => $isPrimary],
+                );
+
                 return $lockedComponent->fresh(['instructors']);
             }, attempts: 3);
         });
@@ -154,17 +197,33 @@ class SubjectOfferingService
         Organization $organization,
         OfferingComponent $component,
         FacultyProfile $faculty,
+        ?User $actor = null,
     ): OfferingComponent {
-        return $this->tenantContext->run($organization, function () use ($organization, $component, $faculty): OfferingComponent {
-            return DB::transaction(function () use ($organization, $component, $faculty): OfferingComponent {
+        return $this->tenantContext->run($organization, function () use ($organization, $component, $faculty, $actor): OfferingComponent {
+            return DB::transaction(function () use ($organization, $component, $faculty, $actor): OfferingComponent {
                 $this->lockOrganization($organization);
                 $lockedComponent = $this->lockComponent($organization, $component);
+                $lockedFaculty = FacultyProfile::query()
+                    ->whereKey($faculty->getKey())
+                    ->where('organization_id', $organization->getKey())
+                    ->lockForUpdate()
+                    ->firstOrFail();
 
-                DB::table('offering_instructors')
+                $deleted = DB::table('offering_instructors')
                     ->where('organization_id', $organization->getKey())
                     ->where('offering_component_id', $lockedComponent->getKey())
-                    ->where('faculty_profile_id', $faculty->getKey())
+                    ->where('faculty_profile_id', $lockedFaculty->getKey())
                     ->delete();
+
+                if ($deleted === 1) {
+                    $this->auditLogger->record(
+                        action: 'subject_offering.instructor_removed',
+                        organization: $organization,
+                        actor: $actor,
+                        subject: $lockedComponent,
+                        before: ['faculty_profile_id' => $lockedFaculty->public_id],
+                    );
+                }
 
                 return $lockedComponent->fresh(['instructors']);
             }, attempts: 3);
@@ -175,14 +234,26 @@ class SubjectOfferingService
         Organization $organization,
         SubjectOffering $offering,
         SubjectOfferingStatus $status,
+        ?User $actor = null,
     ): SubjectOffering {
-        return $this->tenantContext->run($organization, function () use ($organization, $offering, $status): SubjectOffering {
-            return DB::transaction(function () use ($organization, $offering, $status): SubjectOffering {
+        return $this->tenantContext->run($organization, function () use ($organization, $offering, $status, $actor): SubjectOffering {
+            return DB::transaction(function () use ($organization, $offering, $status, $actor): SubjectOffering {
                 $this->lockOrganization($organization);
                 $lockedOffering = $this->lockOffering($organization, $offering);
+                $before = ['status' => $lockedOffering->status->value];
                 $lockedOffering->update(['status' => $status]);
+                $lockedOffering->refresh();
 
-                return $lockedOffering->fresh(['components']);
+                $this->auditLogger->record(
+                    action: 'subject_offering.status_updated',
+                    organization: $organization,
+                    actor: $actor,
+                    subject: $lockedOffering,
+                    before: $before,
+                    after: ['status' => $lockedOffering->status->value],
+                );
+
+                return $lockedOffering->load('components');
             }, attempts: 3);
         });
     }
@@ -300,5 +371,38 @@ class SubjectOfferingService
         if ($loadPercentage < 1 || $loadPercentage > 100) {
             throw ValidationException::withMessages(['load_percentage' => 'Instructor load percentage must be between one and 100.']);
         }
+    }
+
+    /**
+     * @return array{id: string, academic_period_id: string, subject_id: string, student_group_id: string, code: string|null, expected_enrollment: int, status: string, component_count: int}
+     */
+    private function offeringSnapshot(SubjectOffering $offering): array
+    {
+        return [
+            'id' => $offering->public_id,
+            'academic_period_id' => $offering->academicPeriod->public_id,
+            'subject_id' => $offering->subject->public_id,
+            'student_group_id' => $offering->studentGroup->public_id,
+            'code' => $offering->code,
+            'expected_enrollment' => $offering->expected_enrollment,
+            'status' => $offering->status->value,
+            'component_count' => $offering->components->count(),
+        ];
+    }
+
+    /**
+     * @return array{id: string, name: string, kind: string, weekly_minutes: int, sessions_per_week: int, duration_minutes: int, delivery_mode: string}
+     */
+    private function componentSnapshot(OfferingComponent $component): array
+    {
+        return [
+            'id' => $component->public_id,
+            'name' => $component->name,
+            'kind' => $component->kind->value,
+            'weekly_minutes' => $component->weekly_minutes,
+            'sessions_per_week' => $component->sessions_per_week,
+            'duration_minutes' => $component->duration_minutes,
+            'delivery_mode' => $component->delivery_mode->value,
+        ];
     }
 }

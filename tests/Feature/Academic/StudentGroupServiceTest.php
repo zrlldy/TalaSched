@@ -54,14 +54,18 @@ test('student groups can be assigned, dated, and enrolled in matching periods id
         ->and($enrolledGroup->active_from->toDateString())->toBe('2026-08-01')
         ->and($enrolledGroup->active_until->toDateString())->toBe('2026-12-31')
         ->and($enrolledGroup->periods->pluck('id')->all())->toEqual([$firstPeriod->getKey()])
-        ->and(DB::table('student_group_periods')->where('student_group_id', $group->getKey())->count())->toBe(1);
+        ->and(DB::table('student_group_periods')->where('student_group_id', $group->getKey())->count())->toBe(1)
+        ->and(DB::table('audit_events')->where('action', 'student_group.active_dates_saved')->count())->toBe(1)
+        ->and(DB::table('audit_events')->where('action', 'student_group.academic_unit_assigned')->count())->toBe(1)
+        ->and(DB::table('audit_events')->where('action', 'student_group.period_enrolled')->count())->toBe(1);
 
     expect(fn () => $service->enrollInPeriod($organization, $enrolledGroup, $secondPeriod))
         ->toThrow(ValidationException::class);
 
     $unenrolledGroup = $service->unenrollFromPeriod($organization, $enrolledGroup, $firstPeriod);
 
-    expect($unenrolledGroup->periods()->count())->toBe(0);
+    expect($unenrolledGroup->periods()->count())->toBe(0)
+        ->and(DB::table('audit_events')->where('action', 'student_group.period_unenrolled')->count())->toBe(1);
 });
 
 test('student group service enforces date bounds, year ownership, and closed-year protection', function (): void {

@@ -2,12 +2,14 @@
 
 namespace App\Academic;
 
+use App\Audit\AuditLogger;
 use App\Enums\AcademicYearStatus;
 use App\Models\AcademicPeriod;
 use App\Models\AcademicUnit;
 use App\Models\AcademicYear;
 use App\Models\Organization;
 use App\Models\StudentGroup;
+use App\Models\User;
 use App\Tenancy\TenantContext;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\DB;
@@ -15,7 +17,10 @@ use Illuminate\Validation\ValidationException;
 
 class StudentGroupService
 {
-    public function __construct(private TenantContext $tenantContext) {}
+    public function __construct(
+        private TenantContext $tenantContext,
+        private AuditLogger $auditLogger,
+    ) {}
 
     /**
      * Set the date range in which a student group is active.
@@ -25,21 +30,33 @@ class StudentGroupService
         StudentGroup $studentGroup,
         ?CarbonInterface $activeFrom,
         ?CarbonInterface $activeUntil,
+        ?User $actor = null,
     ): StudentGroup {
-        return $this->tenantContext->run($organization, function () use ($organization, $studentGroup, $activeFrom, $activeUntil): StudentGroup {
-            return DB::transaction(function () use ($organization, $studentGroup, $activeFrom, $activeUntil): StudentGroup {
+        return $this->tenantContext->run($organization, function () use ($organization, $studentGroup, $activeFrom, $activeUntil, $actor): StudentGroup {
+            return DB::transaction(function () use ($organization, $studentGroup, $activeFrom, $activeUntil, $actor): StudentGroup {
                 $this->lockOrganization($organization);
                 $lockedGroup = $this->lockGroup($organization, $studentGroup);
                 $academicYear = $this->lockYear($organization, $lockedGroup);
                 $this->assertYearIsOpen($academicYear);
                 $this->assertActiveDates($academicYear, $activeFrom, $activeUntil);
 
+                $before = $this->activeDatesSnapshot($lockedGroup);
                 $lockedGroup->update([
                     'active_from' => $activeFrom,
                     'active_until' => $activeUntil,
                 ]);
+                $lockedGroup->refresh();
 
-                return $lockedGroup->fresh();
+                $this->auditLogger->record(
+                    action: 'student_group.active_dates_saved',
+                    organization: $organization,
+                    actor: $actor,
+                    subject: $lockedGroup,
+                    before: $before,
+                    after: $this->activeDatesSnapshot($lockedGroup),
+                );
+
+                return $lockedGroup;
             }, attempts: 3);
         });
     }
@@ -51,9 +68,10 @@ class StudentGroupService
         Organization $organization,
         StudentGroup $studentGroup,
         AcademicUnit $academicUnit,
+        ?User $actor = null,
     ): StudentGroup {
-        return $this->tenantContext->run($organization, function () use ($organization, $studentGroup, $academicUnit): StudentGroup {
-            return DB::transaction(function () use ($organization, $studentGroup, $academicUnit): StudentGroup {
+        return $this->tenantContext->run($organization, function () use ($organization, $studentGroup, $academicUnit, $actor): StudentGroup {
+            return DB::transaction(function () use ($organization, $studentGroup, $academicUnit, $actor): StudentGroup {
                 $this->lockOrganization($organization);
                 $lockedGroup = $this->lockGroup($organization, $studentGroup);
                 $academicYear = $this->lockYear($organization, $lockedGroup);
@@ -64,9 +82,20 @@ class StudentGroupService
                     ->lockForUpdate()
                     ->firstOrFail();
 
+                $before = ['academic_unit_id' => $lockedGroup->academicUnit->public_id];
                 $lockedGroup->update(['academic_unit_id' => $lockedUnit->getKey()]);
+                $lockedGroup->refresh();
 
-                return $lockedGroup->fresh();
+                $this->auditLogger->record(
+                    action: 'student_group.academic_unit_assigned',
+                    organization: $organization,
+                    actor: $actor,
+                    subject: $lockedGroup,
+                    before: $before,
+                    after: ['academic_unit_id' => $lockedUnit->public_id],
+                );
+
+                return $lockedGroup;
             }, attempts: 3);
         });
     }
@@ -78,9 +107,10 @@ class StudentGroupService
         Organization $organization,
         StudentGroup $studentGroup,
         AcademicPeriod $academicPeriod,
+        ?User $actor = null,
     ): StudentGroup {
-        return $this->tenantContext->run($organization, function () use ($organization, $studentGroup, $academicPeriod): StudentGroup {
-            return DB::transaction(function () use ($organization, $studentGroup, $academicPeriod): StudentGroup {
+        return $this->tenantContext->run($organization, function () use ($organization, $studentGroup, $academicPeriod, $actor): StudentGroup {
+            return DB::transaction(function () use ($organization, $studentGroup, $academicPeriod, $actor): StudentGroup {
                 $this->lockOrganization($organization);
                 $lockedGroup = $this->lockGroup($organization, $studentGroup);
                 $academicYear = $this->lockYear($organization, $lockedGroup);
@@ -103,11 +133,21 @@ class StudentGroupService
                     ]);
                 }
 
-                DB::table('student_group_periods')->insertOrIgnore([
+                $inserted = DB::table('student_group_periods')->insertOrIgnore([
                     'student_group_id' => $lockedGroup->getKey(),
                     'academic_period_id' => $lockedPeriod->getKey(),
                     'organization_id' => $organization->getKey(),
                 ]);
+
+                if ($inserted === 1) {
+                    $this->auditLogger->record(
+                        action: 'student_group.period_enrolled',
+                        organization: $organization,
+                        actor: $actor,
+                        subject: $lockedGroup,
+                        after: ['academic_period_id' => $lockedPeriod->public_id],
+                    );
+                }
 
                 return $lockedGroup->fresh();
             }, attempts: 3);
@@ -121,9 +161,10 @@ class StudentGroupService
         Organization $organization,
         StudentGroup $studentGroup,
         AcademicPeriod $academicPeriod,
+        ?User $actor = null,
     ): StudentGroup {
-        return $this->tenantContext->run($organization, function () use ($organization, $studentGroup, $academicPeriod): StudentGroup {
-            return DB::transaction(function () use ($organization, $studentGroup, $academicPeriod): StudentGroup {
+        return $this->tenantContext->run($organization, function () use ($organization, $studentGroup, $academicPeriod, $actor): StudentGroup {
+            return DB::transaction(function () use ($organization, $studentGroup, $academicPeriod, $actor): StudentGroup {
                 $this->lockOrganization($organization);
                 $lockedGroup = $this->lockGroup($organization, $studentGroup);
                 $academicYear = $this->lockYear($organization, $lockedGroup);
@@ -140,11 +181,21 @@ class StudentGroupService
                     ]);
                 }
 
-                DB::table('student_group_periods')
+                $deleted = DB::table('student_group_periods')
                     ->where('organization_id', $organization->getKey())
                     ->where('student_group_id', $lockedGroup->getKey())
                     ->where('academic_period_id', $lockedPeriod->getKey())
                     ->delete();
+
+                if ($deleted === 1) {
+                    $this->auditLogger->record(
+                        action: 'student_group.period_unenrolled',
+                        organization: $organization,
+                        actor: $actor,
+                        subject: $lockedGroup,
+                        before: ['academic_period_id' => $lockedPeriod->public_id],
+                    );
+                }
 
                 return $lockedGroup->fresh();
             }, attempts: 3);
@@ -209,5 +260,16 @@ class StudentGroupService
     {
         return ($studentGroup->active_from === null || $studentGroup->active_from->lte($academicPeriod->ends_on))
             && ($studentGroup->active_until === null || $studentGroup->active_until->gte($academicPeriod->starts_on));
+    }
+
+    /**
+     * @return array{active_from: string|null, active_until: string|null}
+     */
+    private function activeDatesSnapshot(StudentGroup $studentGroup): array
+    {
+        return [
+            'active_from' => $studentGroup->active_from?->toDateString(),
+            'active_until' => $studentGroup->active_until?->toDateString(),
+        ];
     }
 }

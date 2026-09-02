@@ -70,6 +70,23 @@ test('usage reservations reject over-limit consumption without changing the coun
         ->and($service->current($this->organization, CapabilityKey::MaxMembers))->toBe(3);
 });
 
+test('usage above a downgraded limit remains visible but prevents further consumption', function (): void {
+    $service = app(UsageService::class);
+    $service->reserve($this->organization, CapabilityKey::MaxMembers, 2);
+
+    DB::table('plan_capability_values')
+        ->where('plan_id', $this->planId)
+        ->where('capability_id', DB::table('capabilities')->where('code', CapabilityKey::MaxMembers->value)->value('id'))
+        ->update(['integer_value' => 2]);
+
+    expect($service->current($this->organization, CapabilityKey::MaxMembers))->toBe(3)
+        ->and(fn () => $service->reserve($this->organization, CapabilityKey::MaxMembers))
+        ->toThrow(AuthorizationException::class)
+        ->and($service->release($this->organization, CapabilityKey::MaxMembers))->toBe(2)
+        ->and(fn () => $service->reserve($this->organization, CapabilityKey::MaxMembers))
+        ->toThrow(AuthorizationException::class);
+});
+
 test('usage reservations roll back with the surrounding transaction', function (): void {
     $service = app(UsageService::class);
 

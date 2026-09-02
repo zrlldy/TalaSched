@@ -47,6 +47,34 @@ test('organizations can be created', function () {
         'plan_id' => DB::table('plans')->where('code', 'starter')->value('id'),
         'status' => SubscriptionStatus::Active->value,
     ]);
+
+    $subscriptionAuditEvent = DB::table('audit_events')
+        ->where('action', 'subscription.provisioned')
+        ->first();
+
+    expect($subscriptionAuditEvent)->not->toBeNull()
+        ->and($subscriptionAuditEvent->organization_id)->toBe($organization->id)
+        ->and($subscriptionAuditEvent->actor_user_id)->toBe($user->id)
+        ->and($subscriptionAuditEvent->subject_id)->toBe($organization->public_id)
+        ->and(json_decode($subscriptionAuditEvent->after, true, 512, JSON_THROW_ON_ERROR))
+        ->toBe([
+            'plan_code' => 'starter',
+            'status' => SubscriptionStatus::Active->value,
+        ]);
+
+    $auditEvent = DB::table('audit_events')
+        ->where('action', 'organization.created')
+        ->first();
+
+    expect($auditEvent)->not->toBeNull()
+        ->and($auditEvent->organization_id)->toBe($organization->id)
+        ->and($auditEvent->actor_user_id)->toBe($user->id)
+        ->and($auditEvent->subject_id)->toBe($organization->public_id)
+        ->and(json_decode($auditEvent->after, true, 512, JSON_THROW_ON_ERROR))
+        ->toBe([
+            'name' => 'Test Organization',
+            'slug' => 'test-organization',
+        ]);
 });
 
 test('organization factories create a public identity and matching owner membership', function () {
@@ -169,6 +197,16 @@ test('organizations can be updated by owners', function () {
         'id' => $organization->id,
         'name' => 'Updated Name',
     ]);
+
+    $auditEvent = DB::table('audit_events')
+        ->where('action', 'organization.updated')
+        ->first();
+
+    expect($auditEvent)->not->toBeNull()
+        ->and($auditEvent->actor_user_id)->toBe($user->id)
+        ->and($auditEvent->subject_id)->toBe($organization->public_id)
+        ->and(json_decode($auditEvent->before, true, 512, JSON_THROW_ON_ERROR)['name'])->toBe('Original Name')
+        ->and(json_decode($auditEvent->after, true, 512, JSON_THROW_ON_ERROR)['name'])->toBe('Updated Name');
 });
 
 test('organizations cannot be updated by members', function () {
@@ -216,6 +254,13 @@ test('organizations can be deleted by owners', function () {
     expect($organization->memberships()
         ->where('user_id', $user->id)
         ->where('role', OrganizationRole::Owner->value)
+        ->exists())->toBeTrue();
+
+    expect(DB::table('audit_events')
+        ->where('action', 'organization.deleted')
+        ->where('organization_id', $organization->id)
+        ->where('actor_user_id', $user->id)
+        ->where('subject_id', $organization->public_id)
         ->exists())->toBeTrue();
 });
 
@@ -312,6 +357,7 @@ test('members can leave organizations', function () {
     $organization = Organization::factory()->ownedBy($owner)->create();
 
     $organization->members()->attach($member, ['role' => OrganizationRole::Member->value]);
+    $membership = $organization->memberships()->where('user_id', $member->id)->firstOrFail();
 
     $response = $this
         ->actingAs($member)
@@ -321,6 +367,12 @@ test('members can leave organizations', function () {
     $response->assertInertiaFlash('toast', ['type' => 'success', 'message' => "You left the organization \"{$organization->name}\""]);
 
     expect($member->fresh()->belongsToOrganization($organization))->toBeFalse();
+    expect(DB::table('audit_events')
+        ->where('action', 'organization.member_left')
+        ->where('organization_id', $organization->id)
+        ->where('actor_user_id', $member->id)
+        ->where('subject_id', $membership->public_id)
+        ->exists())->toBeTrue();
 });
 
 test('leaving an organization releases reserved member capacity', function () {

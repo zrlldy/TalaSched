@@ -24,6 +24,12 @@ test('organization member roles can be updated by owners', function () {
     $response->assertRedirect(route('organizations.edit', $organization));
 
     expect($organization->members()->where('user_id', $member->id)->first()->pivot->role->value)->toEqual(OrganizationRole::Admin->value);
+    expect(DB::table('audit_events')
+        ->where('action', 'organization.member_role_updated')
+        ->where('organization_id', $organization->id)
+        ->where('actor_user_id', $owner->id)
+        ->where('subject_id', $membership->public_id)
+        ->exists())->toBeTrue();
 });
 
 test('organization member roles cannot be updated by non owners', function () {
@@ -60,6 +66,12 @@ test('organization members can be removed by owners', function () {
     $response->assertRedirect(route('organizations.edit', $organization));
 
     expect($member->fresh()->belongsToOrganization($organization))->toBeFalse();
+    expect(DB::table('audit_events')
+        ->where('action', 'organization.member_removed')
+        ->where('organization_id', $organization->id)
+        ->where('actor_user_id', $owner->id)
+        ->where('subject_id', $membership->public_id)
+        ->exists())->toBeTrue();
 });
 
 test('removing a member releases reserved member capacity', function () {

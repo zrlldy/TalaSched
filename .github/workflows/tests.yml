@@ -34,5 +34,17 @@ jobs:
       - name: Setup Application
         run: composer setup
 
+      - name: Audit PHP dependencies
+        run: composer audit --locked --no-interaction
+
+      - name: Audit JavaScript dependencies
+        run: npm audit --audit-level=high
+
+      - name: Reject committed private keys
+        run: |
+          if git grep -nE -- '-----BEGIN (EC |RSA |OPENSSH )?PRIVATE KEY-----'; then
+            exit 1
+          fi
+
       - name: Run CI Checks
         run: composer ci:check

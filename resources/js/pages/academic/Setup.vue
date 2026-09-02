@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import WorkspaceState from '@/components/WorkspaceState.vue';
 import { setup } from '@/routes/academic';
 import { store as storeCalendar } from '@/routes/academic/calendars';
 import { store as storeException } from '@/routes/academic/exceptions';
@@ -328,20 +329,12 @@ defineOptions({
                     </Badge>
                 </div>
 
-                <div
+                <WorkspaceState
                     v-if="years.length === 0"
-                    class="rounded-lg border border-dashed border-border bg-muted/40 px-6 py-12 text-center"
-                >
-                    <CalendarDays class="mx-auto mb-4 h-9 w-9 text-amber-500" />
-                    <h2 class="text-lg font-semibold">No academic year yet</h2>
-                    <p
-                        class="mx-auto mt-2 max-w-sm text-sm leading-6 text-muted-foreground"
-                    >
-                        Start with a blank year in the setup rail, or apply a
-                        structure preset when you are ready to map your
-                        institution.
-                    </p>
-                </div>
+                    variant="empty"
+                    title="No academic year yet"
+                    description="Start with a blank year in the setup rail, or apply a structure preset when you are ready to map your institution."
+                />
 
                 <article
                     v-for="year in years"

@@ -11,6 +11,7 @@ use App\Http\Requests\Organizations\UpdateOrganizationRoleRequest;
 use App\Models\Organization;
 use App\Models\Role;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Inertia\Inertia;
 
@@ -24,6 +25,7 @@ class OrganizationRoleController extends Controller
             $organization,
             $request->validated('name'),
             $request->validated('permissions', []),
+            actor: $request->user(),
         );
 
         Inertia::flash('toast', ['type' => 'success', 'message' => __('Custom role created.')]);
@@ -45,6 +47,7 @@ class OrganizationRoleController extends Controller
             $role,
             $request->validated('name'),
             $request->validated('permissions', []),
+            actor: $request->user(),
         );
 
         Inertia::flash('toast', ['type' => 'success', 'message' => __('Custom role updated.')]);
@@ -53,6 +56,7 @@ class OrganizationRoleController extends Controller
     }
 
     public function destroy(
+        Request $request,
         Organization $organization,
         Role $role,
         DeleteOrganizationRole $deleteRole,
@@ -60,7 +64,7 @@ class OrganizationRoleController extends Controller
         $this->ensureRoleBelongsToOrganization($role, $organization);
         Gate::authorize('delete', $role);
 
-        $deleteRole->handle($organization, $role);
+        $deleteRole->handle($organization, $role, actor: $request->user());
 
         Inertia::flash('toast', ['type' => 'success', 'message' => __('Custom role deleted.')]);
 

@@ -271,10 +271,10 @@ class ResourceSetupController extends Controller
             $attributes['employment_type'] = FacultyEmploymentType::from($attributes['employment_type']);
         }
 
-        $profile = $service->create($currentOrganization, $attributes['resource_name'], array_diff_key($attributes, ['resource_name' => true]));
+        $profile = $service->create($currentOrganization, $attributes['resource_name'], array_diff_key($attributes, ['resource_name' => true]), $request->user());
 
         if (is_string($academicUnitId) && $academicUnitId !== '') {
-            $service->assignToAcademicUnit($currentOrganization, $profile, $this->academicUnit($currentOrganization, $academicUnitId), true);
+            $service->assignToAcademicUnit($currentOrganization, $profile, $this->academicUnit($currentOrganization, $academicUnitId), true, $request->user());
         }
 
         return $this->redirectWithMessage($currentOrganization, 'Faculty profile created.');
@@ -283,7 +283,7 @@ class ResourceSetupController extends Controller
     public function storeRoomType(StoreRoomTypeRequest $request, Organization $currentOrganization, ResourceManagementService $service): RedirectResponse
     {
         $data = $request->validated();
-        $service->createRoomType($currentOrganization, $data['code'], $data['name']);
+        $service->createRoomType($currentOrganization, $data['code'], $data['name'], actor: $request->user());
 
         return $this->redirectWithMessage($currentOrganization, 'Room type created.');
     }
@@ -291,7 +291,7 @@ class ResourceSetupController extends Controller
     public function storeFeature(StoreFeatureRequest $request, Organization $currentOrganization, ResourceManagementService $service): RedirectResponse
     {
         $data = $request->validated();
-        $service->createFeature($currentOrganization, $data['code'], $data['name']);
+        $service->createFeature($currentOrganization, $data['code'], $data['name'], $request->user());
 
         return $this->redirectWithMessage($currentOrganization, 'Room feature created.');
     }
@@ -302,7 +302,7 @@ class ResourceSetupController extends Controller
         $campus = isset($data['campus_id']) && $data['campus_id'] !== ''
             ? $this->academicUnit($currentOrganization, $data['campus_id'])
             : null;
-        $service->createBuilding($currentOrganization, $data['code'], $data['name'], $campus);
+        $service->createBuilding($currentOrganization, $data['code'], $data['name'], $campus, $request->user());
 
         return $this->redirectWithMessage($currentOrganization, 'Building created.');
     }
@@ -330,6 +330,7 @@ class ResourceSetupController extends Controller
             $building,
             $data['capacity'] ?? null,
             DeliveryMode::from($data['delivery_mode']),
+            $request->user(),
         );
 
         return $this->redirectWithMessage($currentOrganization, 'Room created.');
@@ -344,6 +345,7 @@ class ResourceSetupController extends Controller
             $data['name'],
             isset($data['units']) ? (float) $data['units'] : null,
             $data['description'] ?? null,
+            $request->user(),
         );
 
         return $this->redirectWithMessage($currentOrganization, 'Subject created.');
@@ -363,6 +365,7 @@ class ResourceSetupController extends Controller
             $data['default_duration_minutes'],
             $data['minimum_room_capacity'] ?? null,
             DeliveryMode::from($data['delivery_mode']),
+            $request->user(),
         );
         $roomTypes = [];
         $features = [];
@@ -386,7 +389,7 @@ class ResourceSetupController extends Controller
         }
 
         if ($roomTypes !== [] || $features !== []) {
-            $service->setRequirements($currentOrganization, $component, $roomTypes, $features);
+            $service->setRequirements($currentOrganization, $component, $roomTypes, $features, $request->user());
         }
 
         return $this->redirectWithMessage($currentOrganization, 'Subject component created.');
@@ -408,6 +411,7 @@ class ResourceSetupController extends Controller
             $data['expected_enrollment'] ?? 0,
             SubjectOfferingStatus::from($data['status']),
             $owningUnit,
+            $request->user(),
         );
 
         return $this->redirectWithMessage($currentOrganization, 'Subject offering created.');
@@ -430,6 +434,7 @@ class ResourceSetupController extends Controller
             $effectiveFrom,
             $effectiveUntil,
             $data['priority'] ?? 0,
+            $request->user(),
         );
 
         return $this->redirectWithMessage($currentOrganization, 'Availability rule created.');

@@ -52,6 +52,8 @@ class HandleInertiaRequests extends Middleware
             'entitlements' => fn (): array => $user?->currentOrganization
                 ? $this->capabilities->values($user->currentOrganization)
                 : [],
+            'canManageSubscription' => fn (): bool => $user?->currentOrganization !== null
+                && $user->can('update', $user->currentOrganization),
         ];
     }
 }

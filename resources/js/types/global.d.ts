@@ -26,6 +26,7 @@ declare module '@inertiajs/core' {
             currentOrganization: Organization | null;
             organizations: Organization[];
             entitlements: OrganizationEntitlements;
+            canManageSubscription: boolean;
             [key: string]: unknown;
         };
     }

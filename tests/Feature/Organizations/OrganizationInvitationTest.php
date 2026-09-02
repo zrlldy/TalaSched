@@ -33,6 +33,15 @@ test('organization invitations can be created', function () {
         'email' => 'invited@example.com',
         'role' => OrganizationRole::Member->value,
     ]);
+
+    $auditEvent = DB::table('audit_events')
+        ->where('action', 'organization.invitation_created')
+        ->first();
+
+    expect($auditEvent)->not->toBeNull()
+        ->and($auditEvent->organization_id)->toBe($organization->id)
+        ->and($auditEvent->actor_user_id)->toBe($owner->id)
+        ->and($auditEvent->after)->not->toContain('invited@example.com');
 });
 
 test('organization invitations cannot grant ownership', function () {
@@ -207,6 +216,13 @@ test('organization invitations can be cancelled by owners', function () {
     $this->assertDatabaseMissing('organization_invitations', [
         'id' => $invitation->id,
     ]);
+
+    expect(DB::table('audit_events')
+        ->where('action', 'organization.invitation_cancelled')
+        ->where('organization_id', $organization->id)
+        ->where('actor_user_id', $owner->id)
+        ->where('subject_id', $invitation->public_id)
+        ->exists())->toBeTrue();
 });
 
 test('organization invitations can be accepted', function () {
@@ -251,6 +267,12 @@ test('organization invitations can be accepted', function () {
         ->where('organization_id', $organization->id)
         ->where('capability_id', $maxMembersCapabilityId)
         ->value('quantity'))->toBe(2);
+    expect(DB::table('audit_events')
+        ->where('action', 'organization.invitation_accepted')
+        ->where('organization_id', $organization->id)
+        ->where('actor_user_id', $invitedUser->id)
+        ->where('subject_id', $invitation->public_id)
+        ->exists())->toBeTrue();
 });
 
 test('unaffiliated users can review pending invitations on the organizations page', function () {
@@ -296,6 +318,13 @@ test('organization invitations can be declined by the invited user', function ()
     $this->assertDatabaseMissing('organization_invitations', [
         'id' => $invitation->id,
     ]);
+
+    expect(DB::table('audit_events')
+        ->where('action', 'organization.invitation_declined')
+        ->where('organization_id', $organization->id)
+        ->where('actor_user_id', $invitedUser->id)
+        ->where('subject_id', $invitation->public_id)
+        ->exists())->toBeTrue();
 });
 
 test('organization invitations cannot be declined by uninvited user', function () {

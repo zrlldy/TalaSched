@@ -2,10 +2,12 @@
 
 namespace App\Academic;
 
+use App\Audit\AuditLogger;
 use App\Enums\AcademicHierarchyPreset;
 use App\Models\AcademicUnit;
 use App\Models\AcademicUnitType;
 use App\Models\Organization;
+use App\Models\User;
 use App\Tenancy\TenantContext;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
@@ -16,6 +18,7 @@ class AcademicHierarchyPresetService
     public function __construct(
         private AcademicHierarchyService $hierarchyService,
         private TenantContext $tenantContext,
+        private AuditLogger $auditLogger,
     ) {}
 
     /**
@@ -26,10 +29,10 @@ class AcademicHierarchyPresetService
      *
      * @return Collection<int, AcademicUnit>
      */
-    public function apply(Organization $organization, AcademicHierarchyPreset $preset): Collection
+    public function apply(Organization $organization, AcademicHierarchyPreset $preset, ?User $actor = null): Collection
     {
-        return $this->tenantContext->run($organization, function () use ($organization, $preset): Collection {
-            return DB::transaction(function () use ($organization, $preset): Collection {
+        return $this->tenantContext->run($organization, function () use ($organization, $preset, $actor): Collection {
+            return DB::transaction(function () use ($organization, $preset, $actor): Collection {
                 $definition = $this->definition($preset);
                 $types = $this->provisionTypes($organization, $definition['types']);
 
@@ -71,10 +74,23 @@ class AcademicHierarchyPresetService
                         name: $unitDefinition['name'],
                         code: $unitDefinition['code'],
                         parent: $parent,
+                        actor: $actor,
                     );
                 }
 
-                return (new Collection(array_values($units)))->sortBy('id')->values();
+                $provisionedUnits = (new Collection(array_values($units)))->sortBy('id')->values();
+
+                $this->auditLogger->record(
+                    action: 'academic_hierarchy_preset.applied',
+                    organization: $organization,
+                    actor: $actor,
+                    after: [
+                        'preset' => $preset->value,
+                        'unit_ids' => $provisionedUnits->pluck('public_id')->all(),
+                    ],
+                );
+
+                return $provisionedUnits;
             }, attempts: 3);
         });
     }

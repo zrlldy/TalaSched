@@ -42,6 +42,15 @@ test('academic setup exposes public-id contracts and manages years, periods, and
     expect($year->status)->toBe(AcademicYearStatus::Draft)
         ->and($year->public_id)->not->toBe((string) $year->getKey());
 
+    $createdYearAudit = DB::table('audit_events')
+        ->where('action', 'academic_year.created')
+        ->firstOrFail();
+
+    expect($createdYearAudit->actor_user_id)->toBe($owner->getKey())
+        ->and($createdYearAudit->organization_id)->toBe($organization->getKey())
+        ->and($createdYearAudit->subject_id)->toBe($year->public_id)
+        ->and(json_decode($createdYearAudit->after, true, flags: JSON_THROW_ON_ERROR)['status'])->toBe(AcademicYearStatus::Draft->value);
+
     $this->actingAs($owner)
         ->post(route('academic.periods.store', [$organization, $year->public_id]), [
             'name' => 'Term 1',
@@ -72,6 +81,10 @@ test('academic setup exposes public-id contracts and manages years, periods, and
 
     expect(AcademicCalendar::query()->where('academic_period_id', $period->getKey())->count())->toBe(1)
         ->and(CalendarException::query()->where('academic_period_id', $period->getKey())->count())->toBe(1);
+    expect(DB::table('audit_events')->where('action', 'academic_calendar.saved')->value('actor_user_id'))
+        ->toBe($owner->getKey())
+        ->and(DB::table('audit_events')->where('action', 'calendar_exception.saved')->value('actor_user_id'))
+        ->toBe($owner->getKey());
 
     $this->actingAs($owner)
         ->post(route('academic.years.activate', [$organization, $year->public_id]))
@@ -80,6 +93,15 @@ test('academic setup exposes public-id contracts and manages years, periods, and
     expect($year->fresh()->status)->toBe(AcademicYearStatus::Active)
         ->and(AcademicPeriod::query()->where('academic_year_id', $year->getKey())->count())->toBe(1);
 
+    $activatedYearAudit = DB::table('audit_events')
+        ->where('action', 'academic_year.activated')
+        ->firstOrFail();
+
+    expect($activatedYearAudit->actor_user_id)->toBe($owner->getKey())
+        ->and(json_decode($activatedYearAudit->before, true, flags: JSON_THROW_ON_ERROR)['status'])->toBe(AcademicYearStatus::Draft->value)
+        ->and(json_decode($activatedYearAudit->after, true, flags: JSON_THROW_ON_ERROR)['status'])->toBe(AcademicYearStatus::Active->value)
+        ->and(DB::table('audit_events')->where('action', 'academic_period.created')->count())->toBe(1);
+
     $this->actingAs($owner)
         ->post(route('academic.presets.apply', $organization), [
             'preset' => AcademicHierarchyPreset::University->value,
@@ -87,6 +109,8 @@ test('academic setup exposes public-id contracts and manages years, periods, and
         ->assertRedirect(route('academic.setup', $organization));
 
     expect(DB::table('academic_unit_types')->where('organization_id', $organization->getKey())->count())->toBe(3);
+    expect(DB::table('audit_events')->where('action', 'academic_hierarchy_preset.applied')->value('actor_user_id'))
+        ->toBe($owner->getKey());
 
     $college = AcademicUnit::query()->where('code', 'UNIVERSITY-COLLEGE-ARTS')->firstOrFail();
 
@@ -102,12 +126,15 @@ test('academic setup exposes public-id contracts and manages years, periods, and
     $unit = AcademicUnit::query()->where('code', 'UNIVERSITY-PROGRAM-BS')->firstOrFail();
 
     expect($unit->public_id)->not->toBe((string) $unit->getKey());
+    expect(DB::table('audit_events')->where('action', 'academic_unit.created')->count())->toBe(4);
 
     $this->actingAs($owner)
         ->post(route('academic.units.archive', [$organization, $unit->public_id]))
         ->assertRedirect(route('academic.setup', $organization));
 
     expect(AcademicUnit::withTrashed()->findOrFail($unit->getKey())->trashed())->toBeTrue();
+    expect(DB::table('audit_events')->where('action', 'academic_unit.archived')->value('actor_user_id'))
+        ->toBe($owner->getKey());
 
     $campus = AcademicUnit::query()->where('code', 'UNIVERSITY-CAMPUS')->firstOrFail();
     $group = StudentGroup::factory()->forAcademicYear($year)->forAcademicUnit($college)->create();
@@ -131,7 +158,13 @@ test('academic setup exposes public-id contracts and manages years, periods, and
 
     expect($group->fresh()->active_from->toDateString())->toBe('2026-08-01')
         ->and($group->fresh()->academic_unit_id)->toBe($campus->getKey())
-        ->and(DB::table('student_group_periods')->where('student_group_id', $group->getKey())->count())->toBe(1);
+        ->and(DB::table('student_group_periods')->where('student_group_id', $group->getKey())->count())->toBe(1)
+        ->and(DB::table('audit_events')->where('action', 'student_group.active_dates_saved')->value('actor_user_id'))
+        ->toBe($owner->getKey())
+        ->and(DB::table('audit_events')->where('action', 'student_group.academic_unit_assigned')->value('actor_user_id'))
+        ->toBe($owner->getKey())
+        ->and(DB::table('audit_events')->where('action', 'student_group.period_enrolled')->value('actor_user_id'))
+        ->toBe($owner->getKey());
 });
 
 test('academic setup mutations require the academic management permission', function (): void {

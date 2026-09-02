@@ -3,6 +3,7 @@
 use App\Models\Organization;
 use App\Models\OrganizationInvitation;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 use Inertia\Testing\AssertableInertia as Assert;
 
 test('registration screen can be rendered', function () {
@@ -45,5 +46,11 @@ test('new users can register', function () {
     $response->assertRedirect(route('organizations.index'));
 
     expect($user->organizations()->exists())->toBeFalse()
-        ->and($user->current_organization_id)->toBeNull();
+        ->and($user->current_organization_id)->toBeNull()
+        ->and(DB::table('audit_events')
+            ->where('action', 'account.registered')
+            ->where('actor_user_id', $user->id)
+            ->where('subject_type', User::class)
+            ->where('subject_id', (string) $user->id)
+            ->exists())->toBeTrue();
 });

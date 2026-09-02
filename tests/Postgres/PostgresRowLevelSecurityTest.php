@@ -1,10 +1,13 @@
 <?php
 
+use App\Audit\AuditLogger;
 use App\Models\AcademicYear;
 use App\Models\Organization;
+use App\Models\User;
 use App\Tenancy\TenantContext;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 uses(TestCase::class);
@@ -159,6 +162,70 @@ test('forced row security also constrains the table-owning role', function () {
         $migrator->statement("select set_config('app.current_organization_id', '', false)");
         $migrator->statement('reset role');
     }
+});
+
+test('audit events cannot be updated or deleted under an authorized tenant context', function () {
+    $organization = Organization::factory()->create();
+    $tenantContext = app(TenantContext::class);
+
+    $auditEventId = $tenantContext->run($organization, function () use ($organization): int {
+        app(AuditLogger::class)->record(
+            action: 'audit.immutability_verified',
+            organization: $organization,
+            subject: $organization,
+        );
+
+        return (int) DB::table('audit_events')
+            ->where('action', 'audit.immutability_verified')
+            ->value('id');
+    });
+
+    expect(fn () => $tenantContext->run($organization, fn () => DB::table('audit_events')
+        ->where('id', $auditEventId)
+        ->update(['action' => 'audit.mutated'])))
+        ->toThrow(QueryException::class);
+    expect(fn () => $tenantContext->run($organization, fn () => DB::table('audit_events')
+        ->where('id', $auditEventId)
+        ->delete()))
+        ->toThrow(QueryException::class);
+
+    expect($tenantContext->run($organization, fn () => DB::table('audit_events')
+        ->where('id', $auditEventId)
+        ->value('action')))
+        ->toBe('audit.immutability_verified');
+});
+
+test('global audit events require the scoped audit context and remain hidden from tenant queries', function () {
+    $user = User::factory()->create();
+
+    expect(fn () => DB::table('audit_events')->insert([
+        'organization_id' => null,
+        'actor_user_id' => $user->id,
+        'impersonator_user_id' => null,
+        'correlation_id' => (string) Str::uuid(),
+        'action' => 'audit.global_direct_insert',
+        'subject_type' => User::class,
+        'subject_id' => (string) $user->id,
+        'before' => null,
+        'after' => null,
+        'ip_address' => '127.0.0.1',
+        'user_agent' => 'TalaSched PostgreSQL test',
+        'occurred_at' => now(),
+    ]))->toThrow(QueryException::class);
+
+    app(AuditLogger::class)->record(
+        action: 'audit.global_insert_permitted',
+        actor: $user,
+        subject: $user,
+    );
+
+    expect(DB::table('audit_events')
+        ->where('action', 'audit.global_insert_permitted')
+        ->exists())->toBeFalse()
+        ->and((bool) DB::connection('pgsql_migrator')->table('audit_events')
+            ->where('action', 'audit.global_insert_permitted')
+            ->where('subject_id', (string) $user->id)
+            ->exists())->toBeTrue();
 });
 
 test('tenant state is cleared after callbacks and database reconnection', function () {

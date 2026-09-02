@@ -47,7 +47,12 @@ test('resource service manages campuses, rooms, room types, features, and archiv
         ->and($room->delivery_mode)->toBe(DeliveryMode::Hybrid)
         ->and($room->capacity)->toBe(32)
         ->and($room->features->first()->is($feature))->toBeTrue()
-        ->and($featureQuantity)->toBe(2);
+        ->and($featureQuantity)->toBe(2)
+        ->and(DB::table('audit_events')->where('action', 'room_type.created')->count())->toBe(1)
+        ->and(DB::table('audit_events')->where('action', 'room_feature.created')->count())->toBe(1)
+        ->and(DB::table('audit_events')->where('action', 'building.created')->count())->toBe(1)
+        ->and(DB::table('audit_events')->where('action', 'room.created')->count())->toBe(1)
+        ->and(DB::table('audit_events')->where('action', 'room.feature_attached')->count())->toBe(1);
 
     $archivedRoom = $service->archiveRoom($organization, $room);
 
@@ -60,11 +65,14 @@ test('resource service manages campuses, rooms, room types, features, and archiv
     expect($restoredRoom->trashed())->toBeFalse()
         ->and($restoredRoom->resource->is_active)->toBeTrue()
         ->and(Room::query()->whereKey($room->getKey())->exists())->toBeTrue()
-        ->and(app(TenantContext::class)->organization())->toBeNull();
+        ->and(app(TenantContext::class)->organization())->toBeNull()
+        ->and(DB::table('audit_events')->where('action', 'room.archived')->count())->toBe(1)
+        ->and(DB::table('audit_events')->where('action', 'room.restored')->count())->toBe(1);
 
     $service->removeFeature($organization, $restoredRoom, $feature);
 
-    expect(DB::table('room_features')->where('room_id', $room->getKey())->exists())->toBeFalse();
+    expect(DB::table('room_features')->where('room_id', $room->getKey())->exists())->toBeFalse()
+        ->and(DB::table('audit_events')->where('action', 'room.feature_removed')->count())->toBe(1);
 });
 
 test('resource service rejects invalid room data and foreign parent records', function (): void {

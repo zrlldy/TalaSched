@@ -11,6 +11,7 @@ use App\Http\Controllers\Scheduling\TimetableVersionComparisonController;
 use App\Http\Controllers\Scheduling\TimetableVersionController;
 use App\Http\Controllers\Scheduling\TimetableViewController;
 use App\Http\Controllers\Scheduling\TimetableWorkspaceController;
+use App\Http\Controllers\Subscriptions\SubscriptionController;
 use App\Http\Middleware\EnsureOrganizationMembership;
 use Illuminate\Support\Facades\Route;
 
@@ -46,7 +47,9 @@ Route::prefix('{current_organization}')
         Route::post('academic/units', [AcademicSetupController::class, 'storeUnit'])->name('academic.units.store');
         Route::post('academic/units/{academic_unit}/move', [AcademicSetupController::class, 'moveUnit'])->name('academic.units.move');
         Route::post('academic/units/{academic_unit}/archive', [AcademicSetupController::class, 'archiveUnit'])->name('academic.units.archive');
-        Route::post('scheduling/entries/validate', [ScheduleEntryController::class, 'validateEntry'])->name('scheduling.entries.validate');
+        Route::post('scheduling/entries/validate', [ScheduleEntryController::class, 'validateEntry'])
+            ->middleware('throttle:schedule-validation')
+            ->name('scheduling.entries.validate');
         Route::post('scheduling/entries', [ScheduleEntryController::class, 'store'])->middleware('idempotent')->name('scheduling.entries.store');
         Route::patch('scheduling/entries/{schedule_entry}', [ScheduleEntryController::class, 'update'])->name('scheduling.entries.update');
         Route::delete('scheduling/entries/{schedule_entry}', [ScheduleEntryController::class, 'destroy'])->name('scheduling.entries.destroy');
@@ -65,13 +68,25 @@ Route::prefix('{current_organization}')
         Route::post('approvals/workflows/{workflow}/versions/{version}/activate', [ApprovalController::class, 'activateWorkflow'])->name('approvals.workflows.versions.activate');
         Route::post('approvals/workflows/{workflow}/retire', [ApprovalController::class, 'retireWorkflow'])->name('approvals.workflows.retire');
         Route::get('approvals/signatories', [ApprovalController::class, 'signatories'])->name('approvals.signatories');
-        Route::post('approvals/signatories', [ApprovalController::class, 'storeSignatory'])->name('approvals.signatories.store');
-        Route::post('approvals/signatories/{signatory_profile}', [ApprovalController::class, 'updateSignatory'])->name('approvals.signatories.update');
+        Route::get('approvals/signatories/{signatory_profile}/signature', [ApprovalController::class, 'downloadSignatorySignature'])
+            ->middleware('signed')
+            ->name('approvals.signatories.signature.download');
+        Route::post('approvals/signatories', [ApprovalController::class, 'storeSignatory'])
+            ->middleware('throttle:uploads')
+            ->name('approvals.signatories.store');
+        Route::post('approvals/signatories/{signatory_profile}', [ApprovalController::class, 'updateSignatory'])
+            ->middleware('throttle:uploads')
+            ->name('approvals.signatories.update');
+        Route::get('subscriptions', [SubscriptionController::class, 'show'])->name('subscriptions.show');
     });
 
 Route::middleware(['auth'])->group(function () {
-    Route::post('invitations/{invitation}/accept', [OrganizationInvitationController::class, 'accept'])->name('invitations.accept');
-    Route::delete('invitations/{invitation}', [OrganizationInvitationController::class, 'decline'])->name('invitations.decline');
+    Route::post('invitations/{invitation}/accept', [OrganizationInvitationController::class, 'accept'])
+        ->middleware('throttle:organization-invitation-responses')
+        ->name('invitations.accept');
+    Route::delete('invitations/{invitation}', [OrganizationInvitationController::class, 'decline'])
+        ->middleware('throttle:organization-invitation-responses')
+        ->name('invitations.decline');
 });
 
 require __DIR__.'/settings.php';

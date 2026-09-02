@@ -2,6 +2,7 @@
 
 use App\Models\User;
 use Illuminate\Auth\Notifications\ResetPassword;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
 use Laravel\Fortify\Features;
 
@@ -59,6 +60,17 @@ test('password can be reset with valid token', function () {
         $response
             ->assertSessionHasNoErrors()
             ->assertRedirect(route('login'));
+
+        $auditEvent = DB::table('audit_events')
+            ->where('action', 'account.password_reset')
+            ->where('subject_type', User::class)
+            ->where('subject_id', (string) $user->id)
+            ->first();
+
+        expect($auditEvent)->not->toBeNull()
+            ->and($auditEvent->actor_user_id)->toBeNull()
+            ->and($auditEvent->before)->toBeNull()
+            ->and($auditEvent->after)->toBeNull();
 
         return true;
     });

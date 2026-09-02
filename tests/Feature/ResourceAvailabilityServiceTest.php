@@ -11,6 +11,7 @@ use App\Models\SchedulingResource;
 use App\Resources\ResourceAvailabilityService;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 test('availability service creates tenant-scoped rules for any active resource', function (): void {
@@ -44,7 +45,8 @@ test('availability service creates tenant-scoped rules for any active resource',
         ->and($rule->academicPeriod->is($period))->toBeTrue()
         ->and($rule->kind)->toBe(AvailabilityKind::Available)
         ->and($rule->priority)->toBe(4)
-        ->and(ResourceAvailabilityRule::query()->where('organization_id', $organization->getKey())->count())->toBe(1);
+        ->and(ResourceAvailabilityRule::query()->where('organization_id', $organization->getKey())->count())->toBe(1)
+        ->and(DB::table('audit_events')->where('action', 'resource_availability_rule.created')->count())->toBe(1);
 });
 
 test('availability service rejects invalid windows and foreign resources', function (): void {

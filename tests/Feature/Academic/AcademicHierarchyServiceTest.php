@@ -29,9 +29,20 @@ test('the hierarchy service supports arbitrary configured chains without preset 
     $program = $service->create($organization, $types['program'], 'Program', 'PROGRAM', $faculty);
     $cohort = $service->create($organization, $types['cohort'], 'Cohort', 'COHORT', $program);
 
-    expect($service->query($organization, $campus->public_id)->pluck('pivot.depth')->all())->toEqual([0, 1, 2, 3])
+    DB::enableQueryLog();
+
+    try {
+        DB::flushQueryLog();
+        $descendants = $service->query($organization, $campus->public_id);
+        $traversalQueryCount = count(DB::getQueryLog());
+    } finally {
+        DB::disableQueryLog();
+    }
+
+    expect($descendants->pluck('pivot.depth')->all())->toEqual([0, 1, 2, 3])
         ->and(DB::table('academic_unit_closure')->where('ancestor_id', $campus->getKey())->count())->toBe(4)
-        ->and($cohort->parent_id)->toBe($program->getKey());
+        ->and($cohort->parent_id)->toBe($program->getKey())
+        ->and($traversalQueryCount)->toBe(2);
 });
 
 test('the hierarchy service creates closure rows and depth-aware root queries', function (): void {
@@ -119,6 +130,7 @@ test('moving a subtree rewrites closure paths and rejects descendant cycles', fu
         ->and(DB::table('academic_unit_closure')->where('ancestor_id', $firstRoot->getKey())->where('descendant_id', $branch->getKey())->exists())->toBeFalse()
         ->and(DB::table('academic_unit_closure')->where('ancestor_id', $secondRoot->getKey())->where('descendant_id', $branch->getKey())->value('depth'))->toBe(1)
         ->and(DB::table('academic_unit_closure')->where('ancestor_id', $secondRoot->getKey())->where('descendant_id', $leaf->getKey())->value('depth'))->toBe(2)
+        ->and(DB::table('audit_events')->where('action', 'academic_unit.moved')->count())->toBe(1)
         ->and(fn () => $service->move($organization, $secondRoot, $leaf))->toThrow(ValidationException::class);
 });
 
@@ -145,5 +157,6 @@ test('archiving requires a leaf without active student groups and hides it from 
 
     expect($archived->trashed())->toBeTrue()
         ->and($service->query($organization, $root->public_id)->pluck('id')->all())->toEqual([$root->id])
-        ->and($service->query($organization, $root->public_id, includeArchived: true)->pluck('id')->all())->toEqual([$root->id, $branch->id]);
+        ->and($service->query($organization, $root->public_id, includeArchived: true)->pluck('id')->all())->toEqual([$root->id, $branch->id])
+        ->and(DB::table('audit_events')->where('action', 'academic_unit.archived')->count())->toBe(1);
 });
