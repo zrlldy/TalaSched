@@ -18,6 +18,7 @@ use App\Http\Requests\Academic\StoreAcademicPeriodRequest;
 use App\Http\Requests\Academic\StoreAcademicUnitRequest;
 use App\Http\Requests\Academic\StoreAcademicYearRequest;
 use App\Http\Requests\Academic\StoreCalendarExceptionRequest;
+use App\Http\Requests\Academic\StoreStudentGroupRequest;
 use App\Http\Requests\Academic\UpdateStudentGroupDatesRequest;
 use App\Models\AcademicPeriod;
 use App\Models\AcademicUnit;
@@ -158,6 +159,7 @@ class AcademicSetupController extends Controller
                 'id' => $group->public_id,
                 'code' => $group->code,
                 'name' => $group->name,
+                'expected_headcount' => $group->expected_headcount,
                 'academic_year_id' => $group->academicYear->public_id,
                 'year_status' => $group->academicYear->status->value,
                 'year_starts_on' => $group->academicYear->starts_on->toDateString(),
@@ -344,6 +346,23 @@ class AcademicSetupController extends Controller
         Inertia::flash('toast', ['type' => 'success', 'message' => __('Calendar exception saved.')]);
 
         return to_route('academic.setup', ['current_organization' => $currentOrganization->slug]);
+    }
+
+    public function storeGroup(StoreStudentGroupRequest $request, Organization $currentOrganization, StudentGroupService $groups): RedirectResponse
+    {
+        $groups->create(
+            $currentOrganization,
+            $request->user(),
+            $request->validated('academic_year_id'),
+            $request->validated('academic_unit_id'),
+            $request->validated('code'),
+            $request->validated('name'),
+            (int) $request->validated('expected_headcount'),
+        );
+
+        Inertia::flash('toast', ['type' => 'success', 'message' => __('Student group created. Choose its participating periods below.')]);
+
+        return to_route('academic.setup', ['current_organization' => $currentOrganization->slug, 'section' => 'groups']);
     }
 
     public function updateGroupDates(UpdateStudentGroupDatesRequest $request, Organization $currentOrganization, string $studentGroup, StudentGroupService $groups): RedirectResponse

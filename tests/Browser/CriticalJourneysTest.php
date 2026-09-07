@@ -3,8 +3,10 @@
 use App\Enums\AcademicYearStatus;
 use App\Enums\OrganizationRole;
 use App\Enums\SubjectOfferingStatus;
+use App\Enums\TimetableVersionStatus;
 use App\Models\AcademicCalendar;
 use App\Models\AcademicPeriod;
+use App\Models\AcademicUnit;
 use App\Models\AcademicYear;
 use App\Models\FacultyProfile;
 use App\Models\OfferingComponent;
@@ -13,6 +15,7 @@ use App\Models\ResourceAvailabilityRule;
 use App\Models\Room;
 use App\Models\ScheduleEntry;
 use App\Models\SchedulingResource;
+use App\Models\StudentGroup;
 use App\Models\Subject;
 use App\Models\SubjectOffering;
 use App\Models\Timetable;
@@ -52,8 +55,13 @@ test('schedulers can prepare an offering add a named class and safely edit its c
     $page = visit(route('scheduling.timetables.show', [$organization, $timetable]))
         ->click('Add class')
         ->select('#new-class-offering', $component->public_id)
-        ->fill('#new-class-start', '09:00')
+        ->fill('#new-class-start', '03:00')
         ->select('#new-class-room', $room->resource->public_id)
+        ->click('Save class')
+        ->assertSee('What needs attention')
+        ->assertSee('Save blocked')
+        ->assertValue('#new-class-start', '03:00')
+        ->fill('#new-class-start', '09:00')
         ->screenshot(filename: 'workspace-add-class')
         ->click('Save class')
         ->assertSee('Introduction to Programming')
@@ -63,7 +71,7 @@ test('schedulers can prepare an offering add a named class and safely edit its c
         ->fill('#entry-notes', 'Updated from the timetable editor')
         ->click('Check and save')
         ->assertSee('Class saved. Conflict checks passed.')
-        ->assertNoSmoke()
+        ->assertNoJavaScriptErrors()
         ->screenshot(filename: 'workspace-saved-class');
 
     $entry = ScheduleEntry::query()->where('timetable_version_id', $version->id)->sole();
@@ -71,7 +79,8 @@ test('schedulers can prepare an offering add a named class and safely edit its c
         ->and($entry->lock_version)->toBe(2)->and($entry->resources()->count())->toBe(3);
 
     $page->fill('#entry-start', '03:00')->fill('#entry-end', '04:30')->click('Check and save')
-        ->assertSee('Conflict status')->assertSee('Save blocked')->assertNoJavaScriptErrors();
+        ->assertSee('Conflict status')->assertSee('Save blocked')
+        ->assertValue('#entry-start', '03:00')->assertDontSee('Class saved. Conflict checks passed.')->assertNoJavaScriptErrors();
     expect($entry->fresh()->starts_at_minute)->toBe(570)->and($entry->fresh()->lock_version)->toBe(2);
 });
 
@@ -133,7 +142,7 @@ test('published timetables show early and late classes without editable controls
     grantManualSchedulingEntitlement($organization);
     $period = AcademicPeriod::factory()->forAcademicYear(AcademicYear::factory()->forOrganization($organization)->create())->create();
     $timetable = Timetable::factory()->create(['academic_period_id' => $period->id]);
-    $version = TimetableVersion::factory()->create(['timetable_id' => $timetable->id, 'organization_id' => $organization->id, 'created_by' => $owner->id, 'status' => \App\Enums\TimetableVersionStatus::Published]);
+    $version = TimetableVersion::factory()->create(['timetable_id' => $timetable->id, 'organization_id' => $organization->id, 'created_by' => $owner->id, 'status' => TimetableVersionStatus::Published]);
     ScheduleEntry::factory()->create(['timetable_version_id' => $version->id, 'starts_at_minute' => 30, 'ends_at_minute' => 120]);
     ScheduleEntry::factory()->create(['timetable_version_id' => $version->id, 'starts_at_minute' => 1350, 'ends_at_minute' => 1440]);
     $this->actingAs($owner);
@@ -272,6 +281,34 @@ test('academic sections reveal clock fields only in the teaching calendar', func
         ->assertScript('document.querySelectorAll(\'input[type="time"]\').length', 4)
         ->assertNoSmoke()
         ->screenshot(filename: 'workspace-academic-calendar');
+});
+
+test('academic administrators can create their first student group and enroll it in a period', function (): void {
+    $owner = User::factory()->withOwnedOrganization()->create();
+    $organization = $owner->currentOrganization;
+    $year = AcademicYear::factory()->forOrganization($organization)->create();
+    $period = AcademicPeriod::factory()->forAcademicYear($year)->create(['name' => 'First semester']);
+    $unit = AcademicUnit::factory()->forOrganization($organization)->create(['name' => 'Computer Science']);
+    $this->actingAs($owner);
+
+    visit(route('academic.setup', [$organization, 'section' => 'groups']))
+        ->assertSee('Add a student group')
+        ->select('#group-year', $year->public_id)
+        ->select('#group-unit', $unit->public_id)
+        ->fill('#group-code', 'BSCS-1A')
+        ->fill('#group-name', 'Computer Science 1A')
+        ->fill('#group-headcount', '30')
+        ->click('Create student group')
+        ->assertSee('Student group created.')
+        ->assertQueryStringHas('section', 'groups')
+        ->assertSee('Computer Science 1A')
+        ->click('Enroll First semester')
+        ->assertSee('Remove First semester')
+        ->assertNoSmoke()
+        ->screenshot(filename: 'workspace-student-groups');
+    $group = StudentGroup::query()->where('organization_id', $organization->id)->sole();
+    expect($group->periods()->sole()->is($period))->toBeTrue()
+        ->and($group->resource->name)->toBe('Computer Science 1A');
 });
 
 test('mobile users can find pages through search and see focused resource sections', function (): void {

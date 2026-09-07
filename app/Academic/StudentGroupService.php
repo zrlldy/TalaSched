@@ -4,15 +4,19 @@ namespace App\Academic;
 
 use App\Audit\AuditLogger;
 use App\Enums\AcademicYearStatus;
+use App\Enums\ResourceType;
 use App\Models\AcademicPeriod;
 use App\Models\AcademicUnit;
 use App\Models\AcademicYear;
 use App\Models\Organization;
+use App\Models\SchedulingResource;
 use App\Models\StudentGroup;
 use App\Models\User;
 use App\Tenancy\TenantContext;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 
 class StudentGroupService
@@ -21,6 +25,67 @@ class StudentGroupService
         private TenantContext $tenantContext,
         private AuditLogger $auditLogger,
     ) {}
+
+    public function create(
+        Organization $organization,
+        User $actor,
+        string $academicYearId,
+        string $academicUnitId,
+        string $code,
+        string $name,
+        int $expectedHeadcount = 0,
+    ): StudentGroup {
+        $code = trim($code);
+        $name = trim($name);
+        Validator::make(['code' => $code, 'name' => $name, 'expected_headcount' => $expectedHeadcount], [
+            'code' => ['required', 'string', 'max:64'],
+            'name' => ['required', 'string', 'max:255'],
+            'expected_headcount' => ['integer', 'min:0'],
+        ])->validate();
+
+        return $this->tenantContext->run($organization, function () use ($organization, $actor, $academicYearId, $academicUnitId, $code, $name, $expectedHeadcount): StudentGroup {
+            return DB::transaction(function () use ($organization, $actor, $academicYearId, $academicUnitId, $code, $name, $expectedHeadcount): StudentGroup {
+                $this->lockOrganization($organization);
+                Gate::forUser($actor)->authorize('create', [StudentGroup::class, $organization]);
+                $year = AcademicYear::query()
+                    ->where('organization_id', $organization->getKey())
+                    ->where('public_id', $academicYearId)
+                    ->lockForUpdate()->firstOrFail();
+                if ($year->status === AcademicYearStatus::Closed) {
+                    throw ValidationException::withMessages(['academic_year_id' => __('Choose an open academic year for the student group.')]);
+                }
+                $unit = AcademicUnit::query()
+                    ->where('organization_id', $organization->getKey())
+                    ->where('public_id', $academicUnitId)
+                    ->lockForUpdate()->firstOrFail();
+                if (StudentGroup::withTrashed()->where('organization_id', $organization->getKey())
+                    ->where('academic_year_id', $year->getKey())->where('code', $code)->exists()) {
+                    throw ValidationException::withMessages(['code' => __('This group code is already used in the selected academic year, including archived groups.')]);
+                }
+                $resource = SchedulingResource::query()->create([
+                    'organization_id' => $organization->getKey(),
+                    'type' => ResourceType::StudentGroup,
+                    'name' => $name,
+                    'is_active' => true,
+                ]);
+                $group = StudentGroup::query()->create([
+                    'organization_id' => $organization->getKey(),
+                    'scheduling_resource_id' => $resource->getKey(),
+                    'academic_year_id' => $year->getKey(),
+                    'academic_unit_id' => $unit->getKey(),
+                    'code' => $code,
+                    'name' => $name,
+                    'expected_headcount' => $expectedHeadcount,
+                ]);
+                $this->auditLogger->record(
+                    action: 'student_group.created', organization: $organization, actor: $actor, subject: $group,
+                    after: ['code' => $code, 'name' => $name, 'academic_year_id' => $year->public_id, 'academic_unit_id' => $unit->public_id, 'resource_id' => $resource->public_id, 'expected_headcount' => $expectedHeadcount],
+                );
+
+                return $group;
+            }, attempts: 3);
+        });
+    }
 
     /**
      * Set the date range in which a student group is active.

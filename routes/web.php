@@ -47,6 +47,7 @@ Route::prefix('{current_organization}')
         Route::post('academic/periods/{academic_period}/calendar', [AcademicSetupController::class, 'storeCalendar'])->name('academic.calendars.store');
         Route::post('academic/periods/{academic_period}/exceptions', [AcademicSetupController::class, 'storeCalendarException'])->name('academic.exceptions.store');
         Route::post('academic/groups/{student_group}/dates', [AcademicSetupController::class, 'updateGroupDates'])->name('academic.groups.dates');
+        Route::post('academic/groups', [AcademicSetupController::class, 'storeGroup'])->name('academic.groups.store');
         Route::post('academic/groups/{student_group}/unit', [AcademicSetupController::class, 'assignGroupUnit'])->name('academic.groups.unit');
         Route::post('academic/groups/{student_group}/periods/{academic_period}/toggle', [AcademicSetupController::class, 'toggleGroupPeriod'])->name('academic.groups.periods.toggle');
         Route::post('academic/units', [AcademicSetupController::class, 'storeUnit'])->name('academic.units.store');

@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import ValidationSummary from '@/components/ValidationSummary.vue';
 import WorkspacePageHeader from '@/components/WorkspacePageHeader.vue';
 import WorkspaceSectionNav from '@/components/WorkspaceSectionNav.vue';
 import WorkspaceState from '@/components/WorkspaceState.vue';
@@ -19,6 +20,7 @@ import { store as storeException } from '@/routes/academic/exceptions';
 import {
     dates as updateGroupDates,
     unit as assignGroupUnit,
+    store as storeGroup,
 } from '@/routes/academic/groups';
 import { toggle as toggleGroupPeriod } from '@/routes/academic/groups/periods';
 import { store as storePeriod } from '@/routes/academic/periods';
@@ -94,6 +96,7 @@ type StudentGroup = {
     id: string;
     code: string;
     name: string;
+    expected_headcount: number;
     academic_year_id: string;
     year_starts_on: string;
     year_ends_on: string;
@@ -197,6 +200,9 @@ const { section, selectSection } = useWorkspaceSection(
     'academic:' + organizationSlug.value,
 );
 const selectedYearId = ref(props.years[0]?.id ?? '');
+const openYears = computed(() =>
+    props.years.filter((year) => year.status !== 'closed'),
+);
 const selectedYears = computed(() =>
     props.years.filter((year) => year.id === selectedYearId.value),
 );
@@ -1127,7 +1133,8 @@ defineOptions({
                                 class="mt-1 text-xs leading-5 text-muted-foreground"
                             >
                                 {{ group.academic_unit.name }} ·
-                                {{ group.year_status }}
+                                {{ group.year_status }} ·
+                                {{ group.expected_headcount }} students expected
                             </p>
                         </div>
                         <Badge variant="secondary"
@@ -1284,8 +1291,157 @@ defineOptions({
                 v-else
                 class="px-5 py-10 text-center text-sm leading-5 text-muted-foreground"
             >
-                Student groups appear here after they are created in the
-                scheduling resources area.
+                No student groups yet. A group is a class or section of students
+                who follow the same timetable.
+            </div>
+            <div v-if="canManageAcademic" class="border-t border-border/70 p-5">
+                <WorkspaceState
+                    v-if="!openYears.length || !units.length"
+                    variant="empty"
+                    title="Prepare a year and school structure first"
+                    description="Each student group belongs to one academic year and a school unit, such as a grade level or program."
+                >
+                    <template #action>
+                        <Button
+                            variant="outline"
+                            type="button"
+                            @click="
+                                selectSection(
+                                    !openYears.length ? 'years' : 'structure',
+                                )
+                            "
+                            >{{
+                                !openYears.length
+                                    ? 'Set up an academic year'
+                                    : 'Set up school structure'
+                            }}</Button
+                        >
+                    </template>
+                </WorkspaceState>
+                <details
+                    v-else
+                    :open="groups.length === 0"
+                    class="rounded-lg border border-border/70 p-4"
+                >
+                    <summary class="cursor-pointer text-sm font-semibold">
+                        Add a student group
+                    </summary>
+                    <Form
+                        v-bind="storeGroup.form(organizationSlug)"
+                        error-bag="createGroup"
+                        v-slot="{ errors, processing }"
+                        class="mt-4 grid gap-4"
+                        @success="selectSection('groups')"
+                    >
+                        <p class="text-sm text-muted-foreground">
+                            For example, Grade 7 - Section A or BSCS 1A. The
+                            scheduling resource is created automatically; select
+                            participating periods after saving.
+                        </p>
+                        <ValidationSummary :errors="errors" />
+                        <div class="grid gap-4 sm:grid-cols-2">
+                            <div class="grid gap-1.5">
+                                <Label for="group-year">Academic year</Label>
+                                <select
+                                    id="group-year"
+                                    name="academic_year_id"
+                                    required
+                                    class="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                                >
+                                    <option value="">
+                                        Choose an open year
+                                    </option>
+                                    <option
+                                        v-for="year in openYears"
+                                        :key="year.id"
+                                        :value="year.id"
+                                    >
+                                        {{ year.name }}
+                                    </option></select
+                                ><InputError
+                                    :message="errors.academic_year_id"
+                                />
+                            </div>
+                            <div class="grid gap-1.5">
+                                <Label for="group-unit">School unit</Label>
+                                <select
+                                    id="group-unit"
+                                    name="academic_unit_id"
+                                    required
+                                    class="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                                >
+                                    <option value="">
+                                        Choose a grade level or program
+                                    </option>
+                                    <option
+                                        v-for="unit in units"
+                                        :key="unit.id"
+                                        :value="unit.id"
+                                    >
+                                        {{ unit.name }} / {{ unit.type_name }}
+                                    </option></select
+                                ><InputError
+                                    :message="errors.academic_unit_id"
+                                />
+                            </div>
+                            <div class="grid gap-1.5">
+                                <Label for="group-code">Group code</Label
+                                ><Input
+                                    id="group-code"
+                                    name="code"
+                                    placeholder="BSCS-1A"
+                                    maxlength="64"
+                                    required
+                                    class="h-10"
+                                />
+                                <p class="text-xs text-muted-foreground">
+                                    Use a unique code within this academic year.
+                                </p>
+                                <InputError :message="errors.code" />
+                            </div>
+                            <div class="grid gap-1.5">
+                                <Label for="group-name">Group name</Label
+                                ><Input
+                                    id="group-name"
+                                    name="name"
+                                    placeholder="BS Computer Science - 1A"
+                                    maxlength="255"
+                                    required
+                                    class="h-10"
+                                /><InputError :message="errors.name" />
+                            </div>
+                            <div class="grid gap-1.5">
+                                <Label for="group-headcount"
+                                    >Expected students</Label
+                                ><Input
+                                    id="group-headcount"
+                                    name="expected_headcount"
+                                    type="number"
+                                    min="0"
+                                    :default-value="0"
+                                    required
+                                    class="h-10"
+                                />
+                                <p class="text-xs text-muted-foreground">
+                                    Enter 0 if the count is not known yet.
+                                </p>
+                                <InputError
+                                    :message="errors.expected_headcount"
+                                />
+                            </div>
+                        </div>
+                        <Button
+                            class="justify-self-start"
+                            type="submit"
+                            :disabled="processing"
+                            ><Plus class="size-4" />{{
+                                processing
+                                    ? 'Creating group...'
+                                    : 'Create student group'
+                            }}</Button
+                        >
+                    </Form>
+                </details>
             </div>
         </section>
     </div>
