@@ -120,7 +120,7 @@ class SignatoryProfileService
                         ->lockForUpdate()
                         ->firstOrFail();
                     $before = $this->snapshot($lockedProfile);
-                    $oldAssetPath = $lockedProfile->signature_path;
+                    $oldSignature = $this->signatureAsset($lockedProfile);
 
                     $lockedProfile->fill([
                         'name' => Str::squish($name),
@@ -133,9 +133,11 @@ class SignatoryProfileService
                     $this->applyAsset($lockedProfile, $asset);
                     $lockedProfile->save();
 
-                    if ($asset !== null && is_string($oldAssetPath) && $oldAssetPath !== $asset['path']) {
-                        DB::afterCommit(function () use ($oldAssetPath): void {
-                            Storage::disk(SignatoryProfile::SIGNATURE_DISK)->delete($oldAssetPath);
+                    if ($asset !== null && $oldSignature !== null && $oldSignature['path'] !== $asset['path']) {
+                        DB::afterCommit(function () use ($organization, $oldSignature): void {
+                            if (! $this->isApprovalSignatureSnapshot($organization, $oldSignature)) {
+                                Storage::disk(SignatoryProfile::SIGNATURE_DISK)->delete($oldSignature['path']);
+                            }
                         });
                     }
 
@@ -173,6 +175,30 @@ class SignatoryProfileService
         $profile->signature_disk = SignatoryProfile::SIGNATURE_DISK;
         $profile->signature_path = $asset['path'];
         $profile->signature_checksum = $asset['checksum'];
+    }
+
+    /** @return array{checksum: string, path: string}|null */
+    private function signatureAsset(SignatoryProfile $profile): ?array
+    {
+        if (! is_string($profile->signature_path) || ! is_string($profile->signature_checksum)) {
+            return null;
+        }
+
+        return [
+            'checksum' => $profile->signature_checksum,
+            'path' => $profile->signature_path,
+        ];
+    }
+
+    /** @param array{checksum: string, path: string} $asset */
+    private function isApprovalSignatureSnapshot(Organization $organization, array $asset): bool
+    {
+        return DB::table('approval_actions')
+            ->where('organization_id', $organization->getKey())
+            ->where('signature_disk', SignatoryProfile::SIGNATURE_DISK)
+            ->where('signature_path', $asset['path'])
+            ->where('signature_checksum', $asset['checksum'])
+            ->exists();
     }
 
     /**

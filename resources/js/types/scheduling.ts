@@ -1,5 +1,14 @@
 export type ScheduleIssueSeverity = 'hard' | 'soft';
 
+export type ScheduleOfferingOption = {
+    id: string;
+    name: string;
+    group: { id: string; name: string };
+    instructors: { id: string; name: string }[];
+    duration_minutes: number;
+    delivery_mode: string;
+};
+
 export type TimetableVersionStatus =
     | 'draft'
     | 'in_review'

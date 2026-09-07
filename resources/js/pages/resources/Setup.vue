@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Form, Head, usePage } from '@inertiajs/vue3';
+import { Form, Head, Link, usePage } from '@inertiajs/vue3';
 import {
     Building2,
     CircleGauge,
@@ -11,17 +11,25 @@ import {
     School,
     Users,
 } from '@lucide/vue';
-import { computed } from 'vue';
-import Heading from '@/components/Heading.vue';
+import { computed, ref } from 'vue';
 import InputError from '@/components/InputError.vue';
-import SetupRail from '@/components/SetupRail.vue';
-import type { SetupRailStep } from '@/components/SetupRail.vue';
+import MinuteTimeInput from '@/components/MinuteTimeInput.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import ValidationSummary from '@/components/ValidationSummary.vue';
+import WorkspacePageHeader from '@/components/WorkspacePageHeader.vue';
+import WorkspaceSectionNav from '@/components/WorkspaceSectionNav.vue';
+import WorkspaceState from '@/components/WorkspaceState.vue';
+import { useWorkspaceSection } from '@/composables/useWorkspaceSection';
+import { setup as academicSetup } from '@/routes/academic';
 import { store as storeComponent } from '@/routes/catalog/components';
-import { store as storeOffering } from '@/routes/catalog/offerings';
+import {
+    store as storeOffering,
+    instructors as assignInstructor,
+    status as updateOfferingStatus,
+} from '@/routes/catalog/offerings';
 import { store as storeSubject } from '@/routes/catalog/subjects';
 import { setup } from '@/routes/resources';
 import { store as storeAvailability } from '@/routes/resources/availability';
@@ -83,6 +91,11 @@ type Offering = {
     expected_enrollment: number;
     status: string;
     components_count: number;
+    components: {
+        id: string;
+        name: string;
+        instructors: { id: string; name: string }[];
+    }[];
 };
 
 type Props = {
@@ -140,34 +153,55 @@ const formatMinutes = (minutes: number | null) => {
     return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 };
 
-const resourceCount = computed(() => props.resources.length);
-
-const resourceSetupSteps = computed<SetupRailStep[]>(() => [
-    {
-        label: 'People & places',
-        description: 'Add faculty and rooms',
-        href: '#resource-registry',
-        complete: props.faculty.length + props.rooms.length > 0,
-    },
-    {
-        label: 'Course catalog',
-        description: 'Add subjects and components',
-        href: '#catalog',
-        complete: props.subjects.length > 0,
-    },
-    {
-        label: 'Offerings',
-        description: 'Match courses to groups',
-        href: '#catalog',
-        complete: props.offerings.length > 0,
-    },
-    {
-        label: 'Availability',
-        description: 'Set when resources can be used',
-        href: '#availability',
-        complete: false,
-    },
+const { section, selectSection } = useWorkspaceSection(
+    ['faculty', 'rooms', 'subjects', 'offerings', 'availability'],
+    'faculty',
+    'resources:' + organizationSlug.value,
+);
+const search = ref('');
+const roomName = ref('');
+const sections = computed(() => [
+    { value: 'faculty', label: 'Faculty', count: props.faculty.length },
+    { value: 'rooms', label: 'Rooms', count: props.rooms.length },
+    { value: 'subjects', label: 'Subjects', count: props.subjects.length },
+    { value: 'offerings', label: 'Offerings', count: props.offerings.length },
+    { value: 'availability', label: 'Availability' },
 ]);
+const descriptions: Record<string, string> = {
+    faculty: 'Manage teaching staff and the time they can teach.',
+    rooms: 'Manage teaching spaces, seating capacity, and room requirements.',
+    subjects:
+        'Create reusable subjects, then add their lecture or lab requirements.',
+    offerings:
+        'An offering connects a subject to a student group for an academic period.',
+    availability:
+        'Set when faculty and rooms are available, unavailable, or preferred.',
+};
+const matches = (...values: (string | null)[]) =>
+    values.join(' ').toLowerCase().includes(search.value.trim().toLowerCase());
+const filteredFaculty = computed(() =>
+    props.faculty.filter((person) =>
+        matches(person.name, person.employee_number, person.position),
+    ),
+);
+const filteredRooms = computed(() =>
+    props.rooms.filter((room) =>
+        matches(room.name, room.code, room.building_code),
+    ),
+);
+const filteredSubjects = computed(() =>
+    props.subjects.filter((subject) => matches(subject.name, subject.code)),
+);
+const filteredOfferings = computed(() =>
+    props.offerings.filter((offering) =>
+        matches(
+            offering.code,
+            offering.subject_code,
+            offering.group_label,
+            offering.period_name,
+        ),
+    ),
+);
 
 defineOptions({
     layout: (layoutProps: { currentOrganization?: Organization | null }) => ({
@@ -184,160 +218,110 @@ defineOptions({
 </script>
 
 <template>
-    <Head title="Resources & catalog" />
-
-    <div class="flex min-w-0 flex-col gap-8 pb-8">
-        <header
-            class="relative overflow-hidden rounded-lg border border-sidebar-border bg-sidebar px-4 py-6 text-sidebar-foreground sm:px-6 sm:py-8"
-        >
-            <div
-                class="pointer-events-none absolute -top-24 -right-16 h-72 w-72 rounded-full border-[28px] border-lime-300/15"
+    <div class="mx-auto flex w-full max-w-7xl flex-col gap-5 p-4 sm:p-6">
+        <Head
+            :title="
+                sections.find((item) => item.value === section)?.label ??
+                'Resources'
+            "
+        />
+        <WorkspacePageHeader
+            :title="
+                sections.find((item) => item.value === section)?.label ??
+                'Resources'
+            "
+            section="Prepare your schedule"
+            :description="descriptions[section]"
+        />
+        <WorkspaceSectionNav
+            :sections="sections"
+            :selected="section"
+            label="Resource sections"
+            @select="selectSection"
+        />
+        <div v-show="section !== 'availability'" class="max-w-sm">
+            <Label for="resource-search" class="sr-only"
+                >Search this directory</Label
+            >
+            <Input
+                id="resource-search"
+                v-model="search"
+                type="search"
+                placeholder="Search by name or code..."
+                class="h-11"
             />
-            <div
-                class="relative flex flex-col gap-7 lg:flex-row lg:items-end lg:justify-between"
-            >
-                <div class="max-w-2xl space-y-3">
-                    <p
-                        class="font-mono text-[11px] font-semibold tracking-[0.2em] text-sidebar-primary uppercase"
-                    >
-                        Resources / Catalog
-                    </p>
-                    <h1
-                        class="max-w-xl text-3xl font-semibold tracking-tight md:text-4xl"
-                    >
-                        Prepare the pieces that make a timetable real.
-                    </h1>
-                    <p
-                        class="max-w-xl text-sm leading-6 text-sidebar-foreground/70"
-                    >
-                        Add the people, places, and courses that a scheduler can
-                        actually place on the week.
-                    </p>
-                </div>
-                <div
-                    class="grid w-full max-w-full grid-cols-2 gap-2 text-center sm:grid-cols-4 lg:w-auto lg:min-w-[22rem]"
-                >
-                    <div
-                        class="rounded-md border border-sidebar-border bg-sidebar-accent/50 px-3 py-3"
-                    >
-                        <p class="text-2xl font-semibold">
-                            {{ faculty.length }}
-                        </p>
-                        <p
-                            class="font-mono text-[10px] tracking-wider text-sidebar-foreground/55 uppercase"
-                        >
-                            Faculty
-                        </p>
-                    </div>
-                    <div
-                        class="rounded-md border border-sidebar-border bg-sidebar-accent/50 px-3 py-3"
-                    >
-                        <p class="text-2xl font-semibold">{{ rooms.length }}</p>
-                        <p
-                            class="font-mono text-[10px] tracking-wider text-sidebar-foreground/55 uppercase"
-                        >
-                            Rooms
-                        </p>
-                    </div>
-                    <div
-                        class="rounded-md border border-sidebar-border bg-sidebar-accent/50 px-3 py-3"
-                    >
-                        <p class="text-2xl font-semibold">
-                            {{ subjects.length }}
-                        </p>
-                        <p
-                            class="font-mono text-[10px] tracking-wider text-sidebar-foreground/55 uppercase"
-                        >
-                            Subjects
-                        </p>
-                    </div>
-                    <div
-                        class="rounded-md border border-sidebar-border bg-sidebar-accent/50 px-3 py-3"
-                    >
-                        <p class="text-2xl font-semibold">
-                            {{ offerings.length }}
-                        </p>
-                        <p
-                            class="font-mono text-[10px] tracking-wider text-sidebar-foreground/55 uppercase"
-                        >
-                            Offerings
-                        </p>
-                    </div>
-                </div>
-            </div>
-        </header>
-
-        <SetupRail :steps="resourceSetupSteps" />
-
-        <section class="grid min-w-0 gap-4 md:grid-cols-3">
-            <div class="min-w-0 rounded-lg border border-border/70 bg-card p-5">
-                <Users class="mb-4 h-5 w-5 text-lime-600" />
-                <p
-                    class="font-mono text-[11px] tracking-wider text-muted-foreground uppercase"
-                >
-                    People and places
-                </p>
-                <p class="mt-1 text-lg font-semibold">
-                    {{ resourceCount }} ready to schedule
-                </p>
-                <p class="mt-2 text-sm leading-6 text-muted-foreground">
-                    Faculty and rooms can be assigned to classes and checked for
-                    conflicts.
-                </p>
-            </div>
-            <div class="min-w-0 rounded-lg border border-border/70 bg-card p-5">
-                <Layers3 class="mb-4 h-5 w-5 text-amber-600" />
-                <p
-                    class="font-mono text-[11px] tracking-wider text-muted-foreground uppercase"
-                >
-                    Course building blocks
-                </p>
-                <p class="mt-1 text-lg font-semibold">
-                    {{ subjects.length }} subjects ready
-                </p>
-                <p class="mt-2 text-sm leading-6 text-muted-foreground">
-                    Add lecture or lab details once, then reuse them in each
-                    period offering.
-                </p>
-            </div>
-            <div class="min-w-0 rounded-lg border border-border/70 bg-card p-5">
-                <Clock3 class="mb-4 h-5 w-5 text-sky-600" />
-                <p
-                    class="font-mono text-[11px] tracking-wider text-muted-foreground uppercase"
-                >
-                    When scheduling is allowed
-                </p>
-                <p class="mt-1 text-lg font-semibold">Add working hours</p>
-                <p class="mt-2 text-sm leading-6 text-muted-foreground">
-                    Tell the scheduler when a person or room is available,
-                    unavailable, or reserved for a period.
-                </p>
-            </div>
-        </section>
-
+        </div>
         <section
-            id="resource-registry"
-            v-if="canManageResources"
-            class="scroll-mt-6 space-y-4"
+            v-show="section === 'faculty'"
+            class="space-y-4"
+            aria-label="Faculty"
         >
-            <div
-                class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"
+            <article class="min-w-0 rounded-lg border border-border/70 bg-card">
+                <div class="border-b border-border/70 px-5 py-4">
+                    <h2 class="font-semibold">Faculty directory</h2>
+                    <p class="mt-1 text-sm leading-5 text-muted-foreground">
+                        Primary units and load limits are visible before
+                        scheduling.
+                    </p>
+                </div>
+                <div class="divide-y divide-border">
+                    <div
+                        v-for="person in filteredFaculty"
+                        :key="person.id"
+                        class="flex min-w-0 items-start justify-between gap-4 px-5 py-4"
+                    >
+                        <div class="min-w-0">
+                            <p class="font-medium break-words">
+                                {{ person.name }}
+                            </p>
+                            <p
+                                class="mt-1 text-xs break-words text-muted-foreground"
+                            >
+                                {{
+                                    person.employee_number ||
+                                    'No employee number'
+                                }}
+                                <span v-if="person.position"
+                                    >/ {{ person.position }}</span
+                                >
+                            </p>
+                            <p
+                                class="mt-1 text-xs break-words text-muted-foreground"
+                            >
+                                {{
+                                    person.units
+                                        .map((unit) => unit.name)
+                                        .join(', ') || 'Unassigned'
+                                }}
+                            </p>
+                        </div>
+                        <span
+                            class="font-mono text-xs leading-5 text-muted-foreground"
+                            >{{
+                                formatMinutes(person.maximum_weekly_minutes)
+                            }}/wk</span
+                        >
+                    </div>
+                    <p
+                        v-if="filteredFaculty.length === 0"
+                        class="px-5 py-6 text-sm leading-5 text-muted-foreground"
+                    >
+                        No faculty match this search. Add a faculty member or
+                        try another name.
+                    </p>
+                </div>
+            </article>
+            <details
+                v-if="canManageResources"
+                :open="faculty.length === 0"
+                class="group rounded-lg border border-border bg-card p-5"
             >
-                <Heading
-                    class="min-w-0"
-                    variant="small"
-                    title="Resource registry"
-                    description="Add the people and places a timetable can reserve."
-                />
-                <Badge class="shrink-0" variant="outline"
-                    >{{ faculty.length + rooms.length }} records</Badge
+                <summary
+                    class="cursor-pointer text-sm font-semibold focus-visible:ring-2 focus-visible:ring-ring"
                 >
-            </div>
-
-            <div class="grid min-w-0 gap-5 xl:grid-cols-2">
-                <article
-                    class="min-w-0 rounded-lg border border-border/70 bg-card p-5"
-                >
+                    Add a faculty member
+                </summary>
+                <div class="pt-5">
                     <div class="mb-5 flex items-start gap-3">
                         <div
                             class="rounded-lg bg-lime-500/15 p-2 text-lime-700 dark:text-lime-300"
@@ -349,19 +333,21 @@ defineOptions({
                             <p
                                 class="mt-1 text-sm leading-5 text-muted-foreground"
                             >
-                                Creates the faculty profile and paired
-                                scheduling resource.
+                                Add a faculty member and their teaching load
+                                limits.
                             </p>
                         </div>
                     </div>
                     <Form
+                        @success="selectSection(section)"
                         v-bind="storeFaculty.form([organizationSlug])"
                         #default="{ errors, processing }"
                     >
+                        <ValidationSummary :errors="errors" class="mb-4" />
                         <div class="grid gap-4 sm:grid-cols-2">
                             <div class="sm:col-span-2">
                                 <Label for="faculty-resource-name"
-                                    >Resource name</Label
+                                    >Faculty name</Label
                                 ><Input
                                     id="faculty-resource-name"
                                     name="resource_name"
@@ -464,11 +450,70 @@ defineOptions({
                             ><Plus class="h-4 w-4" /> Add faculty</Button
                         >
                     </Form>
-                </article>
-
-                <article
-                    class="min-w-0 rounded-lg border border-border/70 bg-card p-5"
+                </div>
+            </details>
+        </section>
+        <section
+            v-show="section === 'rooms'"
+            class="space-y-4"
+            aria-label="Rooms"
+        >
+            <article class="min-w-0 rounded-lg border border-border/70 bg-card">
+                <div class="border-b border-border/70 px-5 py-4">
+                    <h2 class="font-semibold">Room directory</h2>
+                    <p class="mt-1 text-sm leading-5 text-muted-foreground">
+                        Find a teaching space by name, code, or building.
+                    </p>
+                </div>
+                <div class="divide-y divide-border">
+                    <div
+                        v-for="room in filteredRooms"
+                        :key="room.id"
+                        class="flex min-w-0 items-start justify-between gap-4 px-5 py-4"
+                    >
+                        <div class="min-w-0">
+                            <p class="font-medium break-words">
+                                {{ room.code }} / {{ room.name }}
+                            </p>
+                            <p
+                                class="mt-1 text-xs break-words text-muted-foreground"
+                            >
+                                {{ room.building_code || 'No building' }} /
+                                {{ room.room_type_code }}
+                            </p>
+                        </div>
+                        <span
+                            class="shrink-0 font-mono text-xs leading-5 text-muted-foreground"
+                            >{{ room.capacity || '—' }} seats</span
+                        >
+                    </div>
+                    <p
+                        v-if="filteredRooms.length === 0"
+                        class="px-5 py-6 text-sm leading-5 text-muted-foreground"
+                    >
+                        No rooms match this search. Add a room or try another
+                        name.
+                    </p>
+                </div>
+            </article>
+            <p
+                v-if="roomTypes.length === 0 && canManageResources"
+                class="rounded-md border border-warning/30 bg-warning/5 p-4 text-sm"
+            >
+                First add a room type, such as Classroom or Laboratory, using
+                Room settings below.
+            </p>
+            <details
+                v-if="canManageResources"
+                :open="rooms.length === 0 && roomTypes.length > 0"
+                class="group rounded-lg border border-border bg-card p-5"
+            >
+                <summary
+                    class="cursor-pointer text-sm font-semibold focus-visible:ring-2 focus-visible:ring-ring"
                 >
+                    Add a room
+                </summary>
+                <div class="pt-5">
                     <div class="mb-5 flex items-start gap-3">
                         <div
                             class="rounded-lg bg-sky-500/15 p-2 text-sky-700 dark:text-sky-300"
@@ -480,26 +525,22 @@ defineOptions({
                             <p
                                 class="mt-1 text-sm leading-5 text-muted-foreground"
                             >
-                                Rooms are schedulable resources with capacity
-                                and delivery constraints.
+                                Set the room's name, type, and number of seats.
                             </p>
                         </div>
                     </div>
                     <Form
+                        @success="selectSection(section)"
                         v-bind="storeRoom.form([organizationSlug])"
                         #default="{ errors, processing }"
                     >
+                        <ValidationSummary :errors="errors" class="mb-4" />
                         <div class="grid gap-4 sm:grid-cols-2">
-                            <div class="sm:col-span-2">
-                                <Label for="room-resource-name"
-                                    >Resource name</Label
-                                ><Input
-                                    id="room-resource-name"
-                                    name="resource_name"
-                                    :class="fieldClass"
-                                    placeholder="Science Lab 1"
-                                /><InputError :message="errors.resource_name" />
-                            </div>
+                            <input
+                                type="hidden"
+                                name="resource_name"
+                                :value="roomName"
+                            />
                             <div>
                                 <Label for="room-code">Room code</Label
                                 ><Input
@@ -513,6 +554,7 @@ defineOptions({
                                 <Label for="room-name">Display name</Label
                                 ><Input
                                     id="room-name"
+                                    v-model="roomName"
                                     name="name"
                                     :class="fieldClass"
                                     placeholder="Science Laboratory 1"
@@ -587,258 +629,215 @@ defineOptions({
                             ><Plus class="h-4 w-4" /> Add room</Button
                         >
                     </Form>
-                </article>
-            </div>
-
-            <div class="grid min-w-0 gap-5 lg:grid-cols-3">
-                <article
-                    class="min-w-0 rounded-lg border border-border/70 bg-card p-5"
-                >
-                    <div class="mb-4 flex items-center gap-3">
-                        <School class="h-4 w-4 text-sky-600" />
-                        <h2 class="font-semibold">Room type</h2>
-                    </div>
-                    <Form
-                        v-bind="storeRoomType.form([organizationSlug])"
-                        #default="{ errors, processing }"
-                    >
-                        <Label for="room-type-code-new">Code</Label
-                        ><Input
-                            id="room-type-code-new"
-                            name="code"
-                            :class="fieldClass"
-                            placeholder="LAB"
-                        /><InputError :message="errors.code" />
-                        <Label class="mt-4 block" for="room-type-name-new"
-                            >Name</Label
-                        ><Input
-                            id="room-type-name-new"
-                            name="name"
-                            :class="fieldClass"
-                            placeholder="Laboratory"
-                        /><InputError :message="errors.name" />
-                        <Button
-                            class="mt-4"
-                            size="sm"
-                            type="submit"
-                            :disabled="processing"
-                            ><Plus class="h-4 w-4" /> Add type</Button
-                        >
-                    </Form>
-                </article>
-                <article
-                    class="min-w-0 rounded-lg border border-border/70 bg-card p-5"
-                >
-                    <div class="mb-4 flex items-center gap-3">
-                        <FlaskConical class="h-4 w-4 text-amber-600" />
-                        <h2 class="font-semibold">Room feature</h2>
-                    </div>
-                    <Form
-                        v-bind="storeFeature.form([organizationSlug])"
-                        #default="{ errors, processing }"
-                    >
-                        <Label for="feature-code-new">Code</Label
-                        ><Input
-                            id="feature-code-new"
-                            name="code"
-                            :class="fieldClass"
-                            placeholder="PROJECTOR"
-                        /><InputError :message="errors.code" />
-                        <Label class="mt-4 block" for="feature-name-new"
-                            >Name</Label
-                        ><Input
-                            id="feature-name-new"
-                            name="name"
-                            :class="fieldClass"
-                            placeholder="Projector"
-                        /><InputError :message="errors.name" />
-                        <Button
-                            class="mt-4"
-                            size="sm"
-                            type="submit"
-                            :disabled="processing"
-                            ><Plus class="h-4 w-4" /> Add feature</Button
-                        >
-                    </Form>
-                </article>
-                <article
-                    class="min-w-0 rounded-lg border border-border/70 bg-card p-5"
-                >
-                    <div class="mb-4 flex items-center gap-3">
-                        <Building2 class="h-4 w-4 text-lime-600" />
-                        <h2 class="font-semibold">Building</h2>
-                    </div>
-                    <Form
-                        v-bind="storeBuilding.form([organizationSlug])"
-                        #default="{ errors, processing }"
-                    >
-                        <Label for="building-code-new">Code</Label
-                        ><Input
-                            id="building-code-new"
-                            name="code"
-                            :class="fieldClass"
-                            placeholder="SCI"
-                        /><InputError :message="errors.code" />
-                        <Label class="mt-4 block" for="building-name-new"
-                            >Name</Label
-                        ><Input
-                            id="building-name-new"
-                            name="name"
-                            :class="fieldClass"
-                            placeholder="Science Building"
-                        /><InputError :message="errors.name" />
-                        <Label class="mt-4 block" for="campus-id"
-                            >Campus / unit</Label
-                        ><select
-                            id="campus-id"
-                            name="campus_id"
-                            :class="selectClass"
-                        >
-                            <option value="">No campus link</option>
-                            <option
-                                v-for="unit in units"
-                                :key="unit.id"
-                                :value="unit.id"
-                            >
-                                {{ unit.label }}
-                            </option></select
-                        ><InputError :message="errors.campus_id" />
-                        <Button
-                            class="mt-4"
-                            size="sm"
-                            type="submit"
-                            :disabled="processing"
-                            ><Plus class="h-4 w-4" /> Add building</Button
-                        >
-                    </Form>
-                </article>
-            </div>
-
-            <div
-                v-if="faculty.length > 0 || rooms.length > 0"
-                class="grid min-w-0 gap-5 lg:grid-cols-2"
+                </div>
+            </details>
+            <details
+                v-if="canManageResources"
+                :open="roomTypes.length === 0"
+                class="rounded-lg border bg-card p-5"
             >
-                <article
-                    class="min-w-0 rounded-lg border border-border/70 bg-card"
-                >
-                    <div class="border-b border-border/70 px-5 py-4">
-                        <h2 class="font-semibold">Faculty ledger</h2>
-                        <p class="mt-1 text-sm leading-5 text-muted-foreground">
-                            Primary units and load limits are visible before
-                            scheduling.
-                        </p>
-                    </div>
-                    <div class="divide-y divide-border">
-                        <div
-                            v-for="person in faculty"
-                            :key="person.id"
-                            class="flex min-w-0 items-start justify-between gap-4 px-5 py-4"
-                        >
-                            <div class="min-w-0">
-                                <p class="font-medium break-words">
-                                    {{ person.name }}
-                                </p>
-                                <p
-                                    class="mt-1 text-xs break-words text-muted-foreground"
-                                >
-                                    {{
-                                        person.employee_number ||
-                                        'No employee number'
-                                    }}
-                                    <span v-if="person.position"
-                                        >/ {{ person.position }}</span
-                                    >
-                                </p>
-                                <p
-                                    class="mt-1 text-xs break-words text-muted-foreground"
-                                >
-                                    {{
-                                        person.units
-                                            .map((unit) => unit.name)
-                                            .join(', ') || 'Unassigned'
-                                    }}
-                                </p>
-                            </div>
-                            <span
-                                class="font-mono text-xs leading-5 text-muted-foreground"
-                                >{{
-                                    formatMinutes(
-                                        person.maximum_weekly_minutes,
-                                    )
-                                }}/wk</span
-                            >
+                <summary class="cursor-pointer text-sm font-semibold">
+                    Room settings: types, features &amp; buildings
+                </summary>
+                <div class="mt-4 grid min-w-0 gap-4 lg:grid-cols-3">
+                    <article
+                        class="min-w-0 rounded-lg border border-border/70 bg-card p-5"
+                    >
+                        <div class="mb-4 flex items-center gap-3">
+                            <School class="h-4 w-4 text-sky-600" />
+                            <h2 class="font-semibold">Room type</h2>
                         </div>
-                        <p
-                            v-if="faculty.length === 0"
-                            class="px-5 py-6 text-sm leading-5 text-muted-foreground"
+                        <Form
+                            @success="selectSection(section)"
+                            v-bind="storeRoomType.form([organizationSlug])"
+                            #default="{ errors, processing }"
                         >
-                            No faculty profiles yet.
-                        </p>
-                    </div>
-                </article>
-                <article
-                    class="min-w-0 rounded-lg border border-border/70 bg-card"
-                >
-                    <div class="border-b border-border/70 px-5 py-4">
-                        <h2 class="font-semibold">Room ledger</h2>
-                        <p class="mt-1 text-sm leading-5 text-muted-foreground">
-                            Capacity and delivery mode follow the room resource.
-                        </p>
-                    </div>
-                    <div class="divide-y divide-border">
-                        <div
-                            v-for="room in rooms"
-                            :key="room.id"
-                            class="flex min-w-0 items-start justify-between gap-4 px-5 py-4"
-                        >
-                            <div class="min-w-0">
-                                <p class="font-medium break-words">
-                                    {{ room.code }} / {{ room.name }}
-                                </p>
-                                <p
-                                    class="mt-1 text-xs break-words text-muted-foreground"
-                                >
-                                    {{ room.building_code || 'No building' }} /
-                                    {{ room.room_type_code }}
-                                </p>
-                            </div>
-                            <span
-                                class="shrink-0 font-mono text-xs leading-5 text-muted-foreground"
-                                >{{ room.capacity || '—' }} seats</span
+                            <ValidationSummary :errors="errors" class="mb-4" />
+                            <Label for="room-type-code-new">Code</Label
+                            ><Input
+                                id="room-type-code-new"
+                                name="code"
+                                :class="fieldClass"
+                                placeholder="LAB"
+                            /><InputError :message="errors.code" />
+                            <Label class="mt-4 block" for="room-type-name-new"
+                                >Name</Label
+                            ><Input
+                                id="room-type-name-new"
+                                name="name"
+                                :class="fieldClass"
+                                placeholder="Laboratory"
+                            /><InputError :message="errors.name" />
+                            <Button
+                                class="mt-4"
+                                size="sm"
+                                type="submit"
+                                :disabled="processing"
+                                ><Plus class="h-4 w-4" /> Add type</Button
                             >
+                        </Form>
+                    </article>
+                    <article
+                        class="min-w-0 rounded-lg border border-border/70 bg-card p-5"
+                    >
+                        <div class="mb-4 flex items-center gap-3">
+                            <FlaskConical class="h-4 w-4 text-amber-600" />
+                            <h2 class="font-semibold">Room feature</h2>
                         </div>
-                        <p
-                            v-if="rooms.length === 0"
-                            class="px-5 py-6 text-sm leading-5 text-muted-foreground"
+                        <Form
+                            @success="selectSection(section)"
+                            v-bind="storeFeature.form([organizationSlug])"
+                            #default="{ errors, processing }"
                         >
-                            No rooms yet.
-                        </p>
-                    </div>
-                </article>
-            </div>
+                            <ValidationSummary :errors="errors" class="mb-4" />
+                            <Label for="feature-code-new">Code</Label
+                            ><Input
+                                id="feature-code-new"
+                                name="code"
+                                :class="fieldClass"
+                                placeholder="PROJECTOR"
+                            /><InputError :message="errors.code" />
+                            <Label class="mt-4 block" for="feature-name-new"
+                                >Name</Label
+                            ><Input
+                                id="feature-name-new"
+                                name="name"
+                                :class="fieldClass"
+                                placeholder="Projector"
+                            /><InputError :message="errors.name" />
+                            <Button
+                                class="mt-4"
+                                size="sm"
+                                type="submit"
+                                :disabled="processing"
+                                ><Plus class="h-4 w-4" /> Add feature</Button
+                            >
+                        </Form>
+                    </article>
+                    <article
+                        class="min-w-0 rounded-lg border border-border/70 bg-card p-5"
+                    >
+                        <div class="mb-4 flex items-center gap-3">
+                            <Building2 class="h-4 w-4 text-lime-600" />
+                            <h2 class="font-semibold">Building</h2>
+                        </div>
+                        <Form
+                            @success="selectSection(section)"
+                            v-bind="storeBuilding.form([organizationSlug])"
+                            #default="{ errors, processing }"
+                        >
+                            <ValidationSummary :errors="errors" class="mb-4" />
+                            <Label for="building-code-new">Code</Label
+                            ><Input
+                                id="building-code-new"
+                                name="code"
+                                :class="fieldClass"
+                                placeholder="SCI"
+                            /><InputError :message="errors.code" />
+                            <Label class="mt-4 block" for="building-name-new"
+                                >Name</Label
+                            ><Input
+                                id="building-name-new"
+                                name="name"
+                                :class="fieldClass"
+                                placeholder="Science Building"
+                            /><InputError :message="errors.name" />
+                            <Label class="mt-4 block" for="campus-id"
+                                >Campus / unit</Label
+                            ><select
+                                id="campus-id"
+                                name="campus_id"
+                                :class="selectClass"
+                            >
+                                <option value="">No campus link</option>
+                                <option
+                                    v-for="unit in units"
+                                    :key="unit.id"
+                                    :value="unit.id"
+                                >
+                                    {{ unit.label }}
+                                </option></select
+                            ><InputError :message="errors.campus_id" />
+                            <Button
+                                class="mt-4"
+                                size="sm"
+                                type="submit"
+                                :disabled="processing"
+                                ><Plus class="h-4 w-4" /> Add building</Button
+                            >
+                        </Form>
+                    </article>
+                </div>
+            </details>
         </section>
-
         <section
-            id="catalog"
-            v-if="canManageCatalog"
-            class="scroll-mt-6 space-y-4"
+            v-show="section === 'subjects'"
+            class="space-y-4"
+            aria-label="Subjects"
         >
-            <div
-                class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"
+            <article class="min-w-0 rounded-lg border border-border/70 bg-card">
+                <div class="border-b border-border/70 px-5 py-4">
+                    <h2 class="font-semibold">Subject catalog</h2>
+                    <p class="mt-1 text-sm leading-5 text-muted-foreground">
+                        Components currently attached to each subject.
+                    </p>
+                </div>
+                <div class="divide-y divide-border">
+                    <div
+                        v-for="subject in filteredSubjects"
+                        :key="subject.id"
+                        class="min-w-0 px-5 py-4"
+                    >
+                        <div class="flex items-start justify-between gap-4">
+                            <div class="min-w-0">
+                                <p class="font-medium break-words">
+                                    {{ subject.code }} / {{ subject.name }}
+                                </p>
+                                <p
+                                    class="mt-1 text-xs leading-5 text-muted-foreground"
+                                >
+                                    {{ subject.units || '—' }} units /
+                                    {{ subject.components.length }}
+                                    component(s)
+                                </p>
+                            </div>
+                            <Badge class="shrink-0" variant="outline"
+                                >Catalog</Badge
+                            >
+                        </div>
+                        <div
+                            v-if="subject.components.length"
+                            class="mt-3 flex flex-wrap gap-2"
+                        >
+                            <span
+                                v-for="component in subject.components"
+                                :key="component.kind + component.name"
+                                class="rounded-md bg-muted px-2 py-1 font-mono text-[11px]"
+                                >{{ component.kind }} ·
+                                {{ component.weekly_minutes }}m</span
+                            >
+                        </div>
+                    </div>
+                    <p
+                        v-if="filteredSubjects.length === 0"
+                        class="px-5 py-6 text-sm leading-5 text-muted-foreground"
+                    >
+                        No subjects match this search. Add a subject or try
+                        another name.
+                    </p>
+                </div>
+            </article>
+            <details
+                v-if="canManageCatalog"
+                :open="subjects.length === 0"
+                class="group rounded-lg border border-border bg-card p-5"
             >
-                <Heading
-                    class="min-w-0"
-                    variant="small"
-                    title="Catalog and offerings"
-                    description="Build reusable subjects, then turn them into period offerings."
-                /><Badge class="shrink-0" variant="outline"
-                    >{{ offerings.length }} recent offerings</Badge
+                <summary
+                    class="cursor-pointer text-sm font-semibold focus-visible:ring-2 focus-visible:ring-ring"
                 >
-            </div>
-            <div class="grid min-w-0 gap-5 xl:grid-cols-2">
-                <article
-                    class="min-w-0 rounded-lg border border-border/70 bg-card p-5"
-                >
+                    Add a subject
+                </summary>
+                <div class="pt-5">
                     <div class="mb-5 flex items-start gap-3">
                         <div
                             class="rounded-lg bg-amber-500/15 p-2 text-amber-700 dark:text-amber-300"
@@ -855,9 +854,11 @@ defineOptions({
                         </div>
                     </div>
                     <Form
+                        @success="selectSection(section)"
                         v-bind="storeSubject.form([organizationSlug])"
                         #default="{ errors, processing }"
                     >
+                        <ValidationSummary :errors="errors" class="mb-4" />
                         <div class="grid gap-4 sm:grid-cols-2">
                             <div>
                                 <Label for="subject-code">Subject code</Label
@@ -906,10 +907,19 @@ defineOptions({
                             ><Plus class="h-4 w-4" /> Add subject</Button
                         >
                     </Form>
-                </article>
-                <article
-                    class="min-w-0 rounded-lg border border-border/70 bg-card p-5"
+                </div>
+            </details>
+            <details
+                v-if="canManageCatalog && subjects.length > 0"
+                :open="false"
+                class="group rounded-lg border border-border bg-card p-5"
+            >
+                <summary
+                    class="cursor-pointer text-sm font-semibold focus-visible:ring-2 focus-visible:ring-ring"
                 >
+                    Add lecture or lab requirements
+                </summary>
+                <div class="pt-5">
                     <div class="mb-5 flex items-start gap-3">
                         <div
                             class="rounded-lg bg-sky-500/15 p-2 text-sky-700 dark:text-sky-300"
@@ -921,15 +931,17 @@ defineOptions({
                             <p
                                 class="mt-1 text-sm leading-5 text-muted-foreground"
                             >
-                                Define lecture/lab requirements; offering
-                                creation snapshots them.
+                                Set the weekly teaching time, session length,
+                                and room needs.
                             </p>
                         </div>
                     </div>
                     <Form
+                        @success="selectSection(section)"
                         v-bind="storeComponent.form([organizationSlug])"
                         #default="{ errors, processing }"
                     >
+                        <ValidationSummary :errors="errors" class="mb-4" />
                         <div class="grid gap-4 sm:grid-cols-2">
                             <div class="sm:col-span-2">
                                 <Label for="component-subject">Subject</Label
@@ -999,7 +1011,8 @@ defineOptions({
                                 />
                             </div>
                             <div>
-                                <Label for="duration">Duration / session</Label
+                                <Label for="duration"
+                                    >Duration / session (minutes)</Label
                                 ><Input
                                     id="duration"
                                     name="default_duration_minutes"
@@ -1084,14 +1097,263 @@ defineOptions({
                             ><Plus class="h-4 w-4" /> Add component</Button
                         >
                     </Form>
-                </article>
-            </div>
-            <div
-                class="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]"
+                </div>
+            </details>
+        </section>
+        <section
+            v-show="section === 'offerings'"
+            class="space-y-4"
+            aria-label="Offerings"
+        >
+            <article class="min-w-0 rounded-lg border border-border/70 bg-card">
+                <div class="border-b border-border/70 px-5 py-4">
+                    <h2 class="font-semibold">Recent offerings</h2>
+                    <p class="mt-1 text-sm leading-5 text-muted-foreground">
+                        See which subjects and student groups are prepared for
+                        each period.
+                    </p>
+                </div>
+                <div class="divide-y divide-border">
+                    <div
+                        v-for="offering in filteredOfferings"
+                        :key="offering.id"
+                        class="min-w-0 p-4"
+                    >
+                        <div class="flex items-start justify-between gap-3">
+                            <p class="min-w-0 font-medium break-words">
+                                {{ offering.code || offering.subject_code }}
+                            </p>
+                            <Badge class="shrink-0" variant="outline">{{
+                                offering.status
+                            }}</Badge>
+                        </div>
+                        <p class="mt-2 text-sm break-words">
+                            {{ offering.subject_code }} /
+                            {{ offering.group_label }}
+                        </p>
+                        <p
+                            class="mt-1 text-xs break-words text-muted-foreground"
+                        >
+                            {{ offering.period_name }} ·
+                            {{ offering.components_count }} component(s) ·
+                            {{ offering.expected_enrollment }} seats
+                        </p>
+                        <details
+                            class="mt-3 rounded-md border border-border bg-background p-3"
+                        >
+                            <summary class="cursor-pointer text-sm font-medium">
+                                Teaching team and readiness
+                            </summary>
+                            <div class="mt-3 grid gap-4">
+                                <p class="text-xs text-muted-foreground">
+                                    Only active offerings can be added to a
+                                    timetable. Assign an eligible instructor to
+                                    each teaching component.
+                                </p>
+                                <Form
+                                    v-if="canManageCatalog"
+                                    v-bind="
+                                        updateOfferingStatus.form(
+                                            organizationSlug,
+                                        )
+                                    "
+                                    :error-bag="`status-${offering.id}`"
+                                    v-slot="{ errors, processing }"
+                                    class="grid gap-2"
+                                    @success="selectSection(section)"
+                                >
+                                    <input
+                                        type="hidden"
+                                        name="offering_id"
+                                        :value="offering.id"
+                                    />
+                                    <Label :for="`status-${offering.id}`"
+                                        >Offering status</Label
+                                    >
+                                    <div
+                                        class="flex flex-wrap items-center gap-2"
+                                    >
+                                        <select
+                                            :id="`status-${offering.id}`"
+                                            name="status"
+                                            :value="offering.status"
+                                            :class="selectClass"
+                                            class="sm:w-auto"
+                                        >
+                                            <option
+                                                v-for="option in offeringStatuses"
+                                                :key="option.value"
+                                                :value="option.value"
+                                            >
+                                                {{ option.label }}
+                                            </option>
+                                        </select>
+                                        <Button
+                                            type="submit"
+                                            variant="outline"
+                                            :disabled="processing"
+                                            >Update status</Button
+                                        >
+                                    </div>
+                                    <ValidationSummary :errors="errors" />
+                                </Form>
+                                <div
+                                    v-for="component in offering.components"
+                                    :key="component.id"
+                                    class="grid gap-2 border-t border-border pt-3"
+                                >
+                                    <h3 class="text-sm font-medium">
+                                        {{ component.name }}
+                                    </h3>
+                                    <p class="text-sm text-muted-foreground">
+                                        {{
+                                            component.instructors
+                                                .map(
+                                                    (instructor) =>
+                                                        instructor.name,
+                                                )
+                                                .join(', ') ||
+                                            'No eligible instructors assigned.'
+                                        }}
+                                    </p>
+                                    <Form
+                                        v-if="canManageCatalog"
+                                        v-bind="
+                                            assignInstructor.form(
+                                                organizationSlug,
+                                            )
+                                        "
+                                        :error-bag="`instructor-${component.id}`"
+                                        v-slot="{ errors, processing }"
+                                        class="grid gap-2"
+                                        @success="selectSection(section)"
+                                    >
+                                        <input
+                                            type="hidden"
+                                            name="offering_component_id"
+                                            :value="component.id"
+                                        />
+                                        <div
+                                            class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_8rem]"
+                                        >
+                                            <div>
+                                                <Label
+                                                    :for="`instructor-${component.id}`"
+                                                    >Eligible instructor</Label
+                                                >
+                                                <select
+                                                    :id="`instructor-${component.id}`"
+                                                    name="faculty_profile_id"
+                                                    required
+                                                    :class="selectClass"
+                                                >
+                                                    <option value="">
+                                                        Choose faculty
+                                                    </option>
+                                                    <option
+                                                        v-for="profile in faculty.filter(
+                                                            (profile) =>
+                                                                !component.instructors.some(
+                                                                    (
+                                                                        instructor,
+                                                                    ) =>
+                                                                        instructor.id ===
+                                                                        profile.id,
+                                                                ),
+                                                        )"
+                                                        :key="profile.id"
+                                                        :value="profile.id"
+                                                    >
+                                                        {{ profile.name }}
+                                                    </option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <Label
+                                                    :for="`load-${component.id}`"
+                                                    >Load share (%)</Label
+                                                ><Input
+                                                    :id="`load-${component.id}`"
+                                                    type="number"
+                                                    name="load_percentage"
+                                                    min="1"
+                                                    max="100"
+                                                    :default-value="100"
+                                                    required
+                                                    :class="fieldClass"
+                                                />
+                                            </div>
+                                        </div>
+                                        <ValidationSummary :errors="errors" />
+                                        <Button
+                                            class="justify-self-start"
+                                            type="submit"
+                                            variant="outline"
+                                            :disabled="
+                                                processing ||
+                                                faculty.length === 0
+                                            "
+                                            >Assign instructor</Button
+                                        >
+                                    </Form>
+                                </div>
+                                <p
+                                    v-if="offering.components.length === 0"
+                                    class="text-sm text-warning"
+                                >
+                                    This offering has no teaching components.
+                                    Add teaching requirements to the subject
+                                    before creating an offering.
+                                </p>
+                            </div>
+                        </details>
+                    </div>
+                    <p
+                        v-if="filteredOfferings.length === 0"
+                        class="text-sm leading-5 text-muted-foreground"
+                    >
+                        No offerings match this search. Create one or try
+                        another search.
+                    </p>
+                </div>
+            </article>
+            <WorkspaceState
+                v-if="
+                    canManageCatalog &&
+                    (!periods.length || !groups.length || !subjects.length)
+                "
+                variant="empty"
+                title="Prepare the offering details first"
+                description="An offering needs an academic period, a student group, and a subject with teaching requirements."
             >
-                <article
-                    class="min-w-0 rounded-lg border border-border/70 bg-card p-5"
+                <template #action
+                    ><Button as-child variant="outline"
+                        ><Link :href="academicSetup(organizationSlug)"
+                            >Review academic setup</Link
+                        ></Button
+                    ><Button
+                        variant="outline"
+                        @click="selectSection('subjects')"
+                        >Review subjects</Button
+                    ></template
                 >
+            </WorkspaceState>
+            <details
+                v-if="
+                    canManageCatalog &&
+                    periods.length > 0 &&
+                    groups.length > 0 &&
+                    subjects.length > 0
+                "
+                :open="offerings.length === 0"
+                class="group rounded-lg border border-border bg-card p-5"
+            >
+                <summary
+                    class="cursor-pointer text-sm font-semibold focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                    Create an offering
+                </summary>
+                <div class="pt-5">
                     <div class="mb-5 flex items-start gap-3">
                         <div
                             class="rounded-lg bg-lime-500/15 p-2 text-lime-700 dark:text-lime-300"
@@ -1108,9 +1370,11 @@ defineOptions({
                         </div>
                     </div>
                     <Form
+                        @success="selectSection(section)"
                         v-bind="storeOffering.form([organizationSlug])"
                         #default="{ errors, processing }"
                     >
+                        <ValidationSummary :errors="errors" class="mb-4" />
                         <div class="space-y-4">
                             <div>
                                 <Label for="offering-period"
@@ -1217,278 +1481,189 @@ defineOptions({
                             ><Plus class="h-4 w-4" /> Create offering</Button
                         >
                     </Form>
-                </article>
-                <article
-                    class="min-w-0 rounded-lg border border-border/70 bg-card"
-                >
-                    <div class="border-b border-border/70 px-5 py-4">
-                        <h2 class="font-semibold">Subject catalog</h2>
-                        <p class="mt-1 text-sm leading-5 text-muted-foreground">
-                            Components currently attached to each subject.
-                        </p>
-                    </div>
-                    <div class="divide-y divide-border">
-                        <div
-                            v-for="subject in subjects"
-                            :key="subject.id"
-                            class="min-w-0 px-5 py-4"
-                        >
-                            <div class="flex items-start justify-between gap-4">
-                                <div class="min-w-0">
-                                    <p class="font-medium break-words">
-                                        {{ subject.code }} / {{ subject.name }}
-                                    </p>
-                                    <p
-                                        class="mt-1 text-xs leading-5 text-muted-foreground"
-                                    >
-                                        {{ subject.units || '—' }} units /
-                                        {{ subject.components.length }}
-                                        component(s)
-                                    </p>
-                                </div>
-                                <Badge class="shrink-0" variant="outline"
-                                    >Catalog</Badge
-                                >
-                            </div>
-                            <div
-                                v-if="subject.components.length"
-                                class="mt-3 flex flex-wrap gap-2"
-                            >
-                                <span
-                                    v-for="component in subject.components"
-                                    :key="component.kind + component.name"
-                                    class="rounded-md bg-muted px-2 py-1 font-mono text-[11px]"
-                                    >{{ component.kind }} ·
-                                    {{ component.weekly_minutes }}m</span
-                                >
-                            </div>
-                        </div>
-                        <p
-                            v-if="subjects.length === 0"
-                            class="px-5 py-6 text-sm leading-5 text-muted-foreground"
-                        >
-                            No subjects yet.
-                        </p>
-                    </div>
-                </article>
-            </div>
-            <article class="min-w-0 rounded-lg border border-border/70 bg-card">
-                <div class="border-b border-border/70 px-5 py-4">
-                    <h2 class="font-semibold">Recent offerings</h2>
-                    <p class="mt-1 text-sm leading-5 text-muted-foreground">
-                        The component count confirms that subject defaults were
-                        copied into the period offering.
-                    </p>
                 </div>
-                <div
-                    class="grid min-w-0 gap-3 p-5 md:grid-cols-2 xl:grid-cols-3"
+            </details>
+        </section>
+        <section
+            v-show="section === 'availability'"
+            class="space-y-4"
+            aria-label="Availability"
+        >
+            <p class="text-sm text-muted-foreground">
+                Times use {{ page.props.organizationTimezone }}.
+            </p>
+            <template v-if="canManageResources"
+                ><article
+                    class="min-w-0 rounded-lg border border-border/70 bg-card p-5"
                 >
                     <div
-                        v-for="offering in offerings"
-                        :key="offering.id"
-                        class="min-w-0 rounded-lg border border-border/70 p-4"
+                        class="mb-5 flex items-start gap-3 rounded-lg bg-muted/50 px-4 py-3"
                     >
-                        <div class="flex items-start justify-between gap-3">
-                            <p class="min-w-0 font-medium break-words">
-                                {{ offering.code || offering.subject_code }}
-                            </p>
-                            <Badge class="shrink-0" variant="outline">{{
-                                offering.status
-                            }}</Badge>
-                        </div>
-                        <p class="mt-2 text-sm break-words">
-                            {{ offering.subject_code }} /
-                            {{ offering.group_label }}
+                        <Clock3 class="mt-0.5 h-4 w-4 shrink-0 text-sky-600" />
+                        <p class="text-xs leading-5 text-muted-foreground">
+                            Choose the start and end time in your organization's
+                            timezone. Use a period override when these hours
+                            apply to one academic period.
                         </p>
-                        <p
-                            class="mt-1 text-xs break-words text-muted-foreground"
+                    </div>
+                    <Form
+                        @success="selectSection(section)"
+                        v-bind="storeAvailability.form([organizationSlug])"
+                        #default="{ errors, processing }"
+                    >
+                        <ValidationSummary :errors="errors" class="mb-4" />
+                        <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                            <div class="xl:col-span-2">
+                                <Label for="availability-resource"
+                                    >Resource</Label
+                                ><select
+                                    id="availability-resource"
+                                    name="resource_id"
+                                    :class="selectClass"
+                                >
+                                    <option value="">Select resource</option>
+                                    <option
+                                        v-for="resource in resources"
+                                        :key="resource.id"
+                                        :value="resource.id"
+                                    >
+                                        {{ resource.type_label }} /
+                                        {{ resource.name }}
+                                    </option></select
+                                ><InputError :message="errors.resource_id" />
+                            </div>
+                            <div class="xl:col-span-2">
+                                <Label for="availability-period"
+                                    >Period override</Label
+                                ><select
+                                    id="availability-period"
+                                    name="period_id"
+                                    :class="selectClass"
+                                >
+                                    <option value="">Global rule</option>
+                                    <option
+                                        v-for="period in periods"
+                                        :key="period.id"
+                                        :value="period.id"
+                                    >
+                                        {{ period.year_name }} /
+                                        {{ period.name }}
+                                    </option></select
+                                ><InputError :message="errors.period_id" />
+                            </div>
+                            <div>
+                                <Label for="availability-kind">Rule kind</Label
+                                ><select
+                                    id="availability-kind"
+                                    name="kind"
+                                    :class="selectClass"
+                                >
+                                    <option
+                                        v-for="option in availabilityKinds"
+                                        :key="option.value"
+                                        :value="option.value"
+                                    >
+                                        {{ option.label }}
+                                    </option></select
+                                ><InputError :message="errors.kind" />
+                            </div>
+                            <div>
+                                <Label for="weekday">Weekday</Label
+                                ><select
+                                    id="weekday"
+                                    name="weekday"
+                                    :class="selectClass"
+                                >
+                                    <option
+                                        v-for="weekday in weekdays"
+                                        :key="weekday.value"
+                                        :value="weekday.value"
+                                    >
+                                        {{ weekday.label }}
+                                    </option></select
+                                ><InputError :message="errors.weekday" />
+                            </div>
+                            <div>
+                                <Label for="starts-at">Start time</Label
+                                ><MinuteTimeInput
+                                    id="starts-at"
+                                    name="starts_at_minute"
+                                    required
+                                    :class="fieldClass"
+                                /><InputError
+                                    :message="errors.starts_at_minute"
+                                />
+                            </div>
+                            <div>
+                                <Label for="ends-at">End time</Label
+                                ><MinuteTimeInput
+                                    id="ends-at"
+                                    name="ends_at_minute"
+                                    allow-end-of-day
+                                    required
+                                    :class="fieldClass"
+                                /><InputError
+                                    :message="errors.ends_at_minute"
+                                />
+                            </div>
+                            <div>
+                                <Label for="effective-from"
+                                    >Effective from</Label
+                                ><Input
+                                    id="effective-from"
+                                    name="effective_from"
+                                    type="date"
+                                    :class="fieldClass"
+                                /><InputError
+                                    :message="errors.effective_from"
+                                />
+                            </div>
+                            <div>
+                                <Label for="effective-until"
+                                    >Effective until</Label
+                                ><Input
+                                    id="effective-until"
+                                    name="effective_until"
+                                    type="date"
+                                    :class="fieldClass"
+                                /><InputError
+                                    :message="errors.effective_until"
+                                />
+                            </div>
+                            <div>
+                                <Label for="priority">Priority</Label
+                                ><Input
+                                    id="priority"
+                                    name="priority"
+                                    type="number"
+                                    min="0"
+                                    :class="fieldClass"
+                                    :default-value="0"
+                                /><InputError :message="errors.priority" />
+                                <p
+                                    class="mt-1 text-[11px] leading-4 text-muted-foreground"
+                                >
+                                    Use 0 for the normal rule; higher values
+                                    take precedence.
+                                </p>
+                            </div>
+                        </div>
+                        <Button
+                            class="mt-5"
+                            type="submit"
+                            :disabled="processing"
+                            ><Plus class="h-4 w-4" /> Add availability
+                            rule</Button
                         >
-                            {{ offering.period_name }} ·
-                            {{ offering.components_count }} component(s) ·
-                            {{ offering.expected_enrollment }} seats
-                        </p>
-                    </div>
-                    <p
-                        v-if="offerings.length === 0"
-                        class="text-sm leading-5 text-muted-foreground"
-                    >
-                        No offerings yet.
-                    </p>
-                </div>
-            </article>
-        </section>
-
-        <section
-            id="availability"
-            v-if="canManageResources"
-            class="scroll-mt-6 space-y-4"
-        >
-            <div
-                class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"
+                    </Form>
+                </article></template
             >
-                <Heading
-                    class="min-w-0"
-                    variant="small"
-                    title="Availability rules"
-                    description="Apply global or period-specific windows to any active faculty or room resource."
-                /><Badge class="shrink-0" variant="outline"
-                    >{{ resources.length }} selectable resources</Badge
-                >
-            </div>
-            <article
-                class="min-w-0 rounded-lg border border-border/70 bg-card p-5"
-            >
-                <div
-                    class="mb-5 flex items-start gap-3 rounded-lg bg-muted/50 px-4 py-3"
-                >
-                    <Clock3 class="mt-0.5 h-4 w-4 shrink-0 text-sky-600" />
-                    <p class="text-xs leading-5 text-muted-foreground">
-                        Set a window using clock minutes:
-                        <span class="font-mono text-foreground">480</span> is
-                        8:00 AM and
-                        <span class="font-mono text-foreground">1020</span> is
-                        5:00 PM. Use a period override only when it differs from
-                        the global rule.
-                    </p>
-                </div>
-                <Form
-                    v-bind="storeAvailability.form([organizationSlug])"
-                    #default="{ errors, processing }"
-                >
-                    <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                        <div class="xl:col-span-2">
-                            <Label for="availability-resource">Resource</Label
-                            ><select
-                                id="availability-resource"
-                                name="resource_id"
-                                :class="selectClass"
-                            >
-                                <option value="">Select resource</option>
-                                <option
-                                    v-for="resource in resources"
-                                    :key="resource.id"
-                                    :value="resource.id"
-                                >
-                                    {{ resource.type_label }} /
-                                    {{ resource.name }}
-                                </option></select
-                            ><InputError :message="errors.resource_id" />
-                        </div>
-                        <div class="xl:col-span-2">
-                            <Label for="availability-period"
-                                >Period override</Label
-                            ><select
-                                id="availability-period"
-                                name="period_id"
-                                :class="selectClass"
-                            >
-                                <option value="">Global rule</option>
-                                <option
-                                    v-for="period in periods"
-                                    :key="period.id"
-                                    :value="period.id"
-                                >
-                                    {{ period.year_name }} / {{ period.name }}
-                                </option></select
-                            ><InputError :message="errors.period_id" />
-                        </div>
-                        <div>
-                            <Label for="availability-kind">Rule kind</Label
-                            ><select
-                                id="availability-kind"
-                                name="kind"
-                                :class="selectClass"
-                            >
-                                <option
-                                    v-for="option in availabilityKinds"
-                                    :key="option.value"
-                                    :value="option.value"
-                                >
-                                    {{ option.label }}
-                                </option></select
-                            ><InputError :message="errors.kind" />
-                        </div>
-                        <div>
-                            <Label for="weekday">Weekday</Label
-                            ><select
-                                id="weekday"
-                                name="weekday"
-                                :class="selectClass"
-                            >
-                                <option
-                                    v-for="weekday in weekdays"
-                                    :key="weekday.value"
-                                    :value="weekday.value"
-                                >
-                                    {{ weekday.label }}
-                                </option></select
-                            ><InputError :message="errors.weekday" />
-                        </div>
-                        <div>
-                            <Label for="starts-at">Starts at (minutes)</Label
-                            ><Input
-                                id="starts-at"
-                                name="starts_at_minute"
-                                type="number"
-                                min="0"
-                                max="1439"
-                                :class="fieldClass"
-                                placeholder="480"
-                            /><InputError :message="errors.starts_at_minute" />
-                        </div>
-                        <div>
-                            <Label for="ends-at">Ends at (minutes)</Label
-                            ><Input
-                                id="ends-at"
-                                name="ends_at_minute"
-                                type="number"
-                                min="1"
-                                max="1440"
-                                :class="fieldClass"
-                                placeholder="1020"
-                            /><InputError :message="errors.ends_at_minute" />
-                        </div>
-                        <div>
-                            <Label for="effective-from">Effective from</Label
-                            ><Input
-                                id="effective-from"
-                                name="effective_from"
-                                type="date"
-                                :class="fieldClass"
-                            /><InputError :message="errors.effective_from" />
-                        </div>
-                        <div>
-                            <Label for="effective-until">Effective until</Label
-                            ><Input
-                                id="effective-until"
-                                name="effective_until"
-                                type="date"
-                                :class="fieldClass"
-                            /><InputError :message="errors.effective_until" />
-                        </div>
-                        <div>
-                            <Label for="priority">Priority</Label
-                            ><Input
-                                id="priority"
-                                name="priority"
-                                type="number"
-                                min="0"
-                                :class="fieldClass"
-                                value="0"
-                            /><InputError :message="errors.priority" />
-                            <p
-                                class="mt-1 text-[11px] leading-4 text-muted-foreground"
-                            >
-                                Use 0 for the normal rule; higher values take
-                                precedence.
-                            </p>
-                        </div>
-                    </div>
-                    <Button class="mt-5" type="submit" :disabled="processing"
-                        ><Plus class="h-4 w-4" /> Add availability rule</Button
-                    >
-                </Form>
-            </article>
+            <WorkspaceState
+                v-else
+                variant="authorization"
+                title="Availability is managed by your administrator"
+                description="Ask your scheduling administrator to update teaching hours or room availability."
+            />
         </section>
     </div>
 </template>

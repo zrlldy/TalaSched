@@ -3,6 +3,8 @@
 namespace App\Providers;
 
 use App\Authorization\OrganizationPermissionResolver;
+use App\Contracts\MalwareScanner;
+use App\Jobs\GenerateTemplateExport;
 use App\Models\Organization;
 use App\Scheduling\ConstraintRegistry;
 use App\Scheduling\Constraints\AcademicCalendarConstraintHandler;
@@ -20,6 +22,8 @@ use App\Scheduling\Constraints\RoomCapacityConstraintHandler;
 use App\Scheduling\Constraints\RoomFeatureConstraintHandler;
 use App\Scheduling\Constraints\RoomTypeConstraintHandler;
 use App\Scheduling\Constraints\VersionEditableConstraintHandler;
+use App\Services\ClamAvMalwareScanner;
+use App\Services\UnavailableMalwareScanner;
 use App\Tenancy\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -30,6 +34,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
+use LogicException;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -39,6 +44,17 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->singleton(TenantContext::class);
+        $this->app->bind(MalwareScanner::class, function (): MalwareScanner {
+            return match ((string) config('malware.driver')) {
+                'clamav' => new ClamAvMalwareScanner(
+                    host: (string) config('malware.clamav.host'),
+                    port: (int) config('malware.clamav.port'),
+                    timeoutSeconds: (int) config('malware.clamav.timeout_seconds'),
+                ),
+                'disabled' => new UnavailableMalwareScanner,
+                default => throw new LogicException('The configured malware scanner driver is not supported.'),
+            };
+        });
         $this->app->scoped(
             OrganizationPermissionResolver::class,
             fn (Application $app): OrganizationPermissionResolver => new OrganizationPermissionResolver($app->make(TenantContext::class)),
@@ -124,6 +140,15 @@ class AppServiceProvider extends ServiceProvider
             'uploads',
             10,
         ));
+
+        RateLimiter::for('template-exports', fn (Request $request): Limit => $this->organizationLimit(
+            $request,
+            'template-exports',
+            5,
+        ));
+
+        RateLimiter::for('template-export-generation', fn (GenerateTemplateExport $job): Limit => Limit::perMinute(10)
+            ->by('template-export-generation|'.$job->organizationPublicId));
     }
 
     /**

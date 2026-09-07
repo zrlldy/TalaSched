@@ -136,40 +136,46 @@ test('concurrent approval decisions serialize one final action', function (): vo
     $organization->members()->attach($left, ['role' => OrganizationRole::Admin]);
     $organization->members()->attach($right, ['role' => OrganizationRole::Admin]);
 
-    $year = AcademicYear::factory()->forOrganization($organization)->create(['status' => 'active']);
-    $period = AcademicPeriod::factory()->forAcademicYear($year)->create();
-    $timetable = Timetable::factory()->create([
-        'organization_id' => $organization->id,
-        'academic_year_id' => $year->id,
-        'academic_period_id' => $period->id,
-    ]);
-    $version = TimetableVersion::factory()->create([
-        'organization_id' => $organization->id,
-        'timetable_id' => $timetable->id,
-        'created_by' => $submitter->id,
-    ]);
-    $workflowVersionId = app(CreateApprovalWorkflowVersion::class)->handle(
-        $organization,
-        $submitter,
-        'Concurrent approvals',
-        [[
-            'sequence' => 1,
-            'label' => 'Scheduling review',
-            'approver_selector_type' => 'permission',
-            'required_permission' => OrganizationPermission::ManageScheduling->value,
-            'role_codes' => [],
-            'minimum_approvals' => 1,
-            'allow_self_approval' => false,
-            'signatory_slot' => 'registrar',
-        ]],
-    );
-    app(ActivateApprovalWorkflowVersion::class)->handle($organization, $submitter, $workflowVersionId);
-    $instanceId = app(SubmitTimetableForApproval::class)->handle($version, $workflowVersionId, $submitter);
+    $tenantContext = app(TenantContext::class);
+    $instanceId = $tenantContext->run($organization, function () use ($organization, $submitter): int {
+        $year = AcademicYear::factory()->forOrganization($organization)->create(['status' => 'active']);
+        $period = AcademicPeriod::factory()->forAcademicYear($year)->create();
+        $timetable = Timetable::factory()->create([
+            'organization_id' => $organization->id,
+            'academic_year_id' => $year->id,
+            'academic_period_id' => $period->id,
+        ]);
+        $version = TimetableVersion::factory()->create([
+            'organization_id' => $organization->id,
+            'timetable_id' => $timetable->id,
+            'created_by' => $submitter->id,
+        ]);
+        $workflowVersionId = app(CreateApprovalWorkflowVersion::class)->handle(
+            $organization,
+            $submitter,
+            'Concurrent approvals',
+            [[
+                'sequence' => 1,
+                'label' => 'Scheduling review',
+                'approver_selector_type' => 'permission',
+                'required_permission' => OrganizationPermission::ManageScheduling->value,
+                'role_codes' => [],
+                'minimum_approvals' => 1,
+                'allow_self_approval' => false,
+                'signatory_slot' => 'registrar',
+            ]],
+        );
+        app(ActivateApprovalWorkflowVersion::class)->handle($organization, $submitter, $workflowVersionId);
+
+        return app(SubmitTimetableForApproval::class)->handle($version, $workflowVersionId, $submitter);
+    });
 
     $results = runConcurrentApprovalDecisionPair($organization, $instanceId, $left, $right);
 
-    expect(collect($results)->where('ok', true)->count())->toBe(1)
-        ->and(collect($results)->where('ok', false)->count())->toBe(1)
-        ->and(DB::table('approval_actions')->where('approval_instance_step_id', DB::table('approval_instance_steps')->where('approval_instance_id', $instanceId)->value('id'))->count())->toBe(1)
-        ->and(DB::table('approval_instances')->whereKey($instanceId)->value('status'))->toBe('approved');
+    $tenantContext->run($organization, function () use ($instanceId, $results): void {
+        expect(collect($results)->where('ok', true)->count())->toBe(1)
+            ->and(collect($results)->where('ok', false)->count())->toBe(1)
+            ->and(DB::table('approval_actions')->where('approval_instance_step_id', DB::table('approval_instance_steps')->where('approval_instance_id', $instanceId)->value('id'))->count())->toBe(1)
+            ->and(DB::table('approval_instances')->where('id', $instanceId)->value('status'))->toBe('approved');
+    });
 });

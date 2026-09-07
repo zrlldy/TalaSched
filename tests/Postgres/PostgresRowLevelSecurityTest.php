@@ -13,7 +13,20 @@ use Tests\TestCase;
 uses(TestCase::class);
 
 test('production database verification passes', function () {
-    $this->artisan('database:verify-production')->assertSuccessful();
+    $serverVersionNumber = (int) DB::scalar("select current_setting('server_version_num')");
+    $serverMajorVersion = intdiv($serverVersionNumber, 10000);
+    $expectedMajorVersion = (int) config('database.production.postgresql_major_version');
+
+    if ($serverMajorVersion !== $expectedMajorVersion) {
+        $this->artisan('database:verify-production')->assertFailed();
+        config(['database.production.postgresql_major_version' => $serverMajorVersion]);
+    }
+
+    try {
+        $this->artisan('database:verify-production')->assertSuccessful();
+    } finally {
+        config(['database.production.postgresql_major_version' => $expectedMajorVersion]);
+    }
 });
 
 test('the application role is neither privileged nor an owner of protected tables', function () {

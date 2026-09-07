@@ -3,6 +3,8 @@
 use App\Audit\AuditLogger;
 use App\Models\Organization;
 use App\Models\User;
+use App\Subscriptions\BillingWebhookLedger;
+use App\Subscriptions\Data\BillingWebhook;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 
@@ -57,4 +59,27 @@ test('deleting an account preserves its global audit actor identifier', function
         ->and($auditEvent->actor_user_id)->toBe($user->id)
         ->and($auditEvent->subject_id)->toBe((string) $user->id)
         ->and($auditEvent->action)->toBe('account.registered');
+});
+
+test('critical billing-webhook audit events remain append-only', function (): void {
+    $webhook = new BillingWebhook('fake', 'evt_immutable', 'subscription.updated', ['status' => 'active']);
+    app(BillingWebhookLedger::class)->claim($webhook);
+
+    $auditEventId = DB::table('audit_events')
+        ->where('action', 'billing_webhook.claimed')
+        ->value('id');
+
+    expect($auditEventId)->not->toBeNull();
+
+    expect(fn () => DB::table('audit_events')
+        ->where('id', $auditEventId)
+        ->update(['action' => 'billing_webhook.altered']))
+        ->toThrow(QueryException::class);
+    expect(fn () => DB::table('audit_events')
+        ->where('id', $auditEventId)
+        ->delete())
+        ->toThrow(QueryException::class);
+
+    expect(DB::table('audit_events')->where('id', $auditEventId)->value('action'))
+        ->toBe('billing_webhook.claimed');
 });

@@ -5,11 +5,13 @@ use App\Enums\AcademicYearStatus;
 use App\Enums\ScheduleExceptionAction;
 use App\Enums\ScheduleResourceRole;
 use App\Enums\SubjectComponentKind;
+use App\Enums\SubjectOfferingStatus;
 use App\Enums\TimetableVersionStatus;
 use App\Models\AcademicPeriod;
 use App\Models\AcademicUnit;
 use App\Models\AcademicUnitType;
 use App\Models\AcademicYear;
+use App\Models\FacultyProfile;
 use App\Models\OfferingComponent;
 use App\Models\ScheduleEntry;
 use App\Models\ScheduleEntryException;
@@ -283,4 +285,29 @@ test('timetable workspace renders the canonical view and preserves validated fil
             ->has('versions')
             ->has('resources')
             ->has('units'));
+});
+
+test('class composer choices are public period scoped and limited to active eligible resources', function (): void {
+    grantManualSchedulingEntitlement($this->organization);
+    $component = $this->entry->offeringComponent;
+    $faculty = FacultyProfile::factory()->forOrganization($this->organization)->create();
+    $inactive = FacultyProfile::factory()->forOrganization($this->organization)->create();
+    $inactive->resource->update(['is_active' => false]);
+    $component->instructors()->attach([$faculty->id, $inactive->id], ['organization_id' => $this->organization->id, 'load_percentage' => 100]);
+    OfferingComponent::factory()->create();
+    $otherPeriod = AcademicPeriod::factory()->forAcademicYear($this->period->academicYear)->create(['sequence' => 2]);
+    OfferingComponent::factory()->forOffering(SubjectOffering::factory()->forAcademicPeriod($otherPeriod)->create())->create();
+
+    $this->actingAs($this->user)->get(route('scheduling.timetables.show', [$this->organization, $this->timetable]))
+        ->assertOk()->assertInertia(fn (Assert $page) => $page
+        ->has('offeringComponents', 1)
+        ->where('offeringComponents.0.id', $component->public_id)
+        ->where('offeringComponents.0.group.id', $this->group->resource->public_id)
+        ->has('offeringComponents.0.instructors', 1)
+        ->where('offeringComponents.0.instructors.0.id', $faculty->resource->public_id)
+        ->missing('offeringComponents.0.organization_id'));
+
+    $component->offering->update(['status' => SubjectOfferingStatus::Inactive]);
+    $this->get(route('scheduling.timetables.show', [$this->organization, $this->timetable]))
+        ->assertOk()->assertInertia(fn (Assert $page) => $page->where('offeringComponents', []));
 });

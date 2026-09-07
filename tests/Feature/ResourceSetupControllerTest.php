@@ -4,6 +4,7 @@ use App\Enums\AcademicPeriodKind;
 use App\Enums\AvailabilityKind;
 use App\Enums\DeliveryMode;
 use App\Enums\FacultyEmploymentType;
+use App\Enums\OrganizationRole;
 use App\Enums\SubjectComponentKind;
 use App\Enums\SubjectOfferingStatus;
 use App\Models\AcademicPeriod;
@@ -11,6 +12,7 @@ use App\Models\AcademicUnit;
 use App\Models\AcademicUnitType;
 use App\Models\AcademicYear;
 use App\Models\FacultyProfile;
+use App\Models\OfferingComponent;
 use App\Models\Organization;
 use App\Models\Room;
 use App\Models\SchedulingResource;
@@ -20,6 +22,36 @@ use App\Models\SubjectOffering;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Inertia\Testing\AssertableInertia as Assert;
+
+test('catalog managers can prepare an offering teaching team and activate it', function (): void {
+    $owner = User::factory()->withOwnedOrganization()->create();
+    $organization = $owner->currentOrganization;
+    $period = AcademicPeriod::factory()->forAcademicYear(AcademicYear::factory()->forOrganization($organization)->create())->create();
+    $offering = SubjectOffering::factory()->forAcademicPeriod($period)->create(['status' => SubjectOfferingStatus::Draft]);
+    $component = OfferingComponent::factory()->forOffering($offering)->create();
+    $faculty = FacultyProfile::factory()->forOrganization($organization)->create();
+    $data = ['offering_component_id' => $component->public_id, 'faculty_profile_id' => $faculty->public_id, 'load_percentage' => 100];
+    $this->actingAs($owner)->post(route('catalog.offerings.instructors', $organization), $data)->assertSessionHasNoErrors()->assertRedirect();
+    $this->post(route('catalog.offerings.status', $organization), ['offering_id' => $offering->public_id, 'status' => 'active'])->assertSessionHasNoErrors()->assertRedirect();
+    expect($component->instructors()->sole()->is($faculty))->toBeTrue()
+        ->and($offering->fresh()->status)->toBe(SubjectOfferingStatus::Active);
+    $this->assertDatabaseHas('audit_events', ['organization_id' => $organization->id, 'action' => 'subject_offering.instructor_assigned']);
+    $this->assertDatabaseHas('audit_events', ['organization_id' => $organization->id, 'action' => 'subject_offering.status_updated']);
+
+    $this->get(route('resources.setup', $organization))->assertInertia(fn (Assert $page) => $page
+        ->where('offerings.0.components.0.id', $component->public_id)
+        ->where('offerings.0.components.0.instructors.0.name', $faculty->resource->name));
+
+    $foreign = FacultyProfile::factory()->create();
+    $this->post(route('catalog.offerings.instructors', $organization), [...$data, 'faculty_profile_id' => $foreign->public_id])->assertSessionHasErrors('faculty_profile_id');
+    $this->post(route('catalog.offerings.instructors', $organization), [...$data, 'offering_component_id' => (string) $component->id])->assertSessionHasErrors('offering_component_id');
+    $this->post(route('catalog.offerings.status', $organization), ['offering_id' => SubjectOffering::factory()->create()->public_id, 'status' => 'active'])->assertSessionHasErrors('offering_id');
+    $viewer = User::factory()->create();
+    $organization->members()->attach($viewer, ['role' => OrganizationRole::Member]);
+    $this->actingAs($viewer)->post(route('catalog.offerings.instructors', $organization), $data)->assertForbidden();
+    $this->post(route('catalog.offerings.status', $organization), ['offering_id' => $offering->public_id, 'status' => 'inactive'])->assertForbidden();
+    expect($component->instructors()->count())->toBe(1)->and($offering->fresh()->status)->toBe(SubjectOfferingStatus::Active);
+});
 
 test('resource setup exposes public contracts and creates the dependency chain', function (): void {
     $owner = User::factory()->withOwnedOrganization()->create();

@@ -1,16 +1,18 @@
 <script setup lang="ts">
 import { Form, Head, usePage } from '@inertiajs/vue3';
 import { ArrowUpRight, CalendarDays, Check, Layers3, Plus } from '@lucide/vue';
-import { computed } from 'vue';
+import { computed, ref, watch } from 'vue';
 import Heading from '@/components/Heading.vue';
 import InputError from '@/components/InputError.vue';
-import SetupRail from '@/components/SetupRail.vue';
-import type { SetupRailStep } from '@/components/SetupRail.vue';
+import MinuteTimeInput from '@/components/MinuteTimeInput.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import WorkspacePageHeader from '@/components/WorkspacePageHeader.vue';
+import WorkspaceSectionNav from '@/components/WorkspaceSectionNav.vue';
 import WorkspaceState from '@/components/WorkspaceState.vue';
+import { useWorkspaceSection } from '@/composables/useWorkspaceSection';
 import { setup } from '@/routes/academic';
 import { store as storeCalendar } from '@/routes/academic/calendars';
 import { store as storeException } from '@/routes/academic/exceptions';
@@ -189,31 +191,30 @@ const periodCount = computed(() =>
     props.years.reduce((count, year) => count + year.periods.length, 0),
 );
 
-const academicSetupSteps = computed<SetupRailStep[]>(() => [
-    {
-        label: 'Academic year',
-        description: 'Set the school-year dates',
-        href: '#academic-years',
-        complete: props.years.length > 0,
+const { section, selectSection } = useWorkspaceSection(
+    ['years', 'calendar', 'structure', 'groups'],
+    'years',
+    'academic:' + organizationSlug.value,
+);
+const selectedYearId = ref(props.years[0]?.id ?? '');
+const selectedYears = computed(() =>
+    props.years.filter((year) => year.id === selectedYearId.value),
+);
+watch(
+    () => props.years.length,
+    () => {
+        selectedYearId.value = props.years[0]?.id ?? '';
     },
+);
+const sections = computed(() => [
+    { value: 'years', label: 'Years & periods', count: props.years.length },
+    { value: 'calendar', label: 'Teaching calendar', count: periodCount.value },
     {
-        label: 'Periods & hours',
-        description: 'Add the weekly rhythm',
-        href: '#academic-years',
-        complete: periodCount.value > 0,
+        value: 'structure',
+        label: 'School structure',
+        count: props.units.length,
     },
-    {
-        label: 'Institution structure',
-        description: 'Add campuses and units',
-        href: '#academic-structure',
-        complete: props.units.length > 0,
-    },
-    {
-        label: 'Student groups',
-        description: 'Connect groups to the year',
-        href: '#student-groups',
-        complete: props.groups.length > 0,
-    },
+    { value: 'groups', label: 'Student groups', count: props.groups.length },
 ]);
 
 defineOptions({
@@ -233,82 +234,47 @@ defineOptions({
 <template>
     <Head title="Academic setup" />
 
-    <div class="flex min-w-0 flex-col gap-8 pb-8">
-        <header
-            class="relative overflow-hidden rounded-lg border border-sidebar-border bg-sidebar px-4 py-6 text-sidebar-foreground sm:px-6 sm:py-8"
+    <div
+        class="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-5 p-4 sm:p-6"
+    >
+        <WorkspacePageHeader
+            title="Academic setup"
+            section="Prepare your schedule"
+            description="Set your school dates, teaching hours, structure, and student groups. Work through one section at a time."
+        />
+        <WorkspaceSectionNav
+            :sections="sections"
+            :selected="section"
+            label="Academic sections"
+            @select="selectSection"
+        />
+        <div
+            v-show="section === 'years' || section === 'calendar'"
+            class="max-w-sm space-y-2"
         >
-            <div
-                class="pointer-events-none absolute -top-20 -right-12 h-64 w-64 rounded-full border-[24px] border-amber-300/20"
-            />
-            <div
-                class="relative flex flex-col gap-6 md:flex-row md:items-end md:justify-between"
+            <Label for="selected-year">Academic year</Label>
+            <select
+                id="selected-year"
+                v-model="selectedYearId"
+                class="h-11 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
             >
-                <div class="max-w-2xl space-y-3">
-                    <p
-                        class="font-mono text-[11px] font-semibold tracking-[0.2em] text-sidebar-primary uppercase"
-                    >
-                        Academic / Setup
-                    </p>
-                    <h1
-                        class="max-w-xl text-3xl font-semibold tracking-tight md:text-4xl"
-                    >
-                        Build the year, then the rhythm.
-                    </h1>
-                    <p
-                        class="max-w-xl text-sm leading-6 text-sidebar-foreground/70"
-                    >
-                        Set the dates people recognize, add the periods that
-                        shape the week, then activate the calendar when it is
-                        ready.
-                    </p>
-                </div>
-                <div
-                    class="grid w-full max-w-full grid-cols-3 gap-2 text-center md:w-auto md:min-w-72"
-                >
-                    <div
-                        class="rounded-md border border-sidebar-border bg-sidebar-accent/50 px-3 py-3"
-                    >
-                        <p class="text-2xl font-semibold">
-                            {{ summary.years }}
-                        </p>
-                        <p
-                            class="font-mono text-[10px] tracking-wider text-sidebar-foreground/55 uppercase"
-                        >
-                            Years
-                        </p>
-                    </div>
-                    <div
-                        class="rounded-md border border-sidebar-border bg-sidebar-accent/50 px-3 py-3"
-                    >
-                        <p class="text-2xl font-semibold">
-                            {{ summary.unit_types }}
-                        </p>
-                        <p
-                            class="font-mono text-[10px] tracking-wider text-sidebar-foreground/55 uppercase"
-                        >
-                            Types
-                        </p>
-                    </div>
-                    <div
-                        class="rounded-md border border-sidebar-border bg-sidebar-accent/50 px-3 py-3"
-                    >
-                        <p class="text-2xl font-semibold">
-                            {{ summary.units }}
-                        </p>
-                        <p
-                            class="font-mono text-[10px] tracking-wider text-sidebar-foreground/55 uppercase"
-                        >
-                            Units
-                        </p>
-                    </div>
-                </div>
-            </div>
-        </header>
-
-        <SetupRail :steps="academicSetupSteps" />
+                <option v-if="years.length === 0" value="">
+                    No academic years yet
+                </option>
+                <option v-for="year in years" :key="year.id" :value="year.id">
+                    {{ year.name }} · {{ statusLabel(year.status) }}
+                </option>
+            </select>
+        </div>
 
         <div
-            class="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(20rem,0.65fr)]"
+            v-show="section === 'years' || section === 'calendar'"
+            class="grid min-w-0 gap-6"
+            :class="
+                section === 'years'
+                    ? 'xl:grid-cols-[minmax(0,1.35fr)_minmax(20rem,0.65fr)]'
+                    : ''
+            "
         >
             <section id="academic-years" class="min-w-0 scroll-mt-6 space-y-4">
                 <div
@@ -317,7 +283,11 @@ defineOptions({
                     <Heading
                         class="min-w-0"
                         variant="small"
-                        title="Academic years"
+                        :title="
+                            section === 'calendar'
+                                ? 'Teaching calendar'
+                                : 'Years & periods'
+                        "
                         description="Periods stay inside their parent year and never overlap."
                     />
                     <Badge
@@ -333,11 +303,11 @@ defineOptions({
                     v-if="years.length === 0"
                     variant="empty"
                     title="No academic year yet"
-                    description="Start with a blank year in the setup rail, or apply a structure preset when you are ready to map your institution."
+                    description="Open Years & periods to create a draft academic year. Then add the periods your school uses."
                 />
 
                 <article
-                    v-for="year in years"
+                    v-for="year in selectedYears"
                     :key="year.id"
                     class="min-w-0 overflow-hidden rounded-lg border border-border/70 bg-card"
                 >
@@ -373,6 +343,7 @@ defineOptions({
                                 {{ statusLabel(year.status) }}
                             </Badge>
                             <Form
+                                @success="selectSection(section)"
                                 v-if="
                                     canManageAcademic && year.status === 'draft'
                                 "
@@ -436,6 +407,7 @@ defineOptions({
                                 </p>
 
                                 <div
+                                    v-show="section === 'calendar'"
                                     class="mt-4 space-y-3 border-t border-border/70 pt-3"
                                 >
                                     <div
@@ -477,6 +449,7 @@ defineOptions({
                                         </Badge>
                                     </div>
                                     <Form
+                                        @success="selectSection(section)"
                                         v-if="
                                             canManageAcademic &&
                                             year.status !== 'closed'
@@ -493,16 +466,13 @@ defineOptions({
                                         <p
                                             class="text-[11px] leading-4 text-muted-foreground"
                                         >
-                                            Enter minutes after midnight:
-                                            <span
-                                                class="font-mono text-foreground"
-                                                >480</span
-                                            >
-                                            is 8:00 AM.
+                                            Choose local teaching hours for this
+                                            weekday.
                                         </p>
                                         <div class="grid gap-2 sm:grid-cols-3">
                                             <select
                                                 name="weekday"
+                                                aria-label="Weekday"
                                                 class="h-10 rounded-md border border-input bg-background px-2 text-xs text-foreground"
                                                 required
                                             >
@@ -514,20 +484,15 @@ defineOptions({
                                                     {{ weekday.label }}
                                                 </option>
                                             </select>
-                                            <Input
+                                            <MinuteTimeInput
                                                 name="starts_at_minute"
-                                                type="number"
-                                                min="0"
-                                                max="1439"
-                                                placeholder="480"
+                                                label="Start time"
                                                 required
                                             />
-                                            <Input
+                                            <MinuteTimeInput
                                                 name="ends_at_minute"
-                                                type="number"
-                                                min="1"
-                                                max="1440"
-                                                placeholder="1020"
+                                                label="End time"
+                                                allow-end-of-day
                                                 required
                                             />
                                         </div>
@@ -555,6 +520,7 @@ defineOptions({
                                 </div>
 
                                 <div
+                                    v-show="section === 'calendar'"
                                     class="mt-4 space-y-3 border-t border-border/70 pt-3"
                                 >
                                     <div
@@ -591,6 +557,7 @@ defineOptions({
                                         </div>
                                     </div>
                                     <Form
+                                        @success="selectSection(section)"
                                         v-if="
                                             canManageAcademic &&
                                             year.status !== 'closed'
@@ -607,6 +574,7 @@ defineOptions({
                                         <div class="grid gap-2 sm:grid-cols-2">
                                             <Input
                                                 name="date"
+                                                aria-label="Exception date"
                                                 type="date"
                                                 :min="period.starts_on"
                                                 :max="period.ends_on"
@@ -614,6 +582,7 @@ defineOptions({
                                             />
                                             <select
                                                 name="kind"
+                                                aria-label="Exception type"
                                                 class="h-10 rounded-md border border-input bg-background px-2 text-xs text-foreground"
                                                 required
                                             >
@@ -628,23 +597,19 @@ defineOptions({
                                         </div>
                                         <Input
                                             name="name"
+                                            aria-label="Exception name"
                                             placeholder="Holiday or special session"
                                             required
                                         />
                                         <div class="grid gap-2 sm:grid-cols-2">
-                                            <Input
+                                            <MinuteTimeInput
                                                 name="starts_at_minute"
-                                                type="number"
-                                                min="0"
-                                                max="1439"
-                                                placeholder="Optional start minute"
+                                                label="Start time"
                                             />
-                                            <Input
+                                            <MinuteTimeInput
                                                 name="ends_at_minute"
-                                                type="number"
-                                                min="1"
-                                                max="1440"
-                                                placeholder="Optional end minute"
+                                                label="End time"
+                                                allow-end-of-day
                                             />
                                         </div>
                                         <InputError
@@ -675,7 +640,9 @@ defineOptions({
                         </div>
 
                         <Form
+                            @success="selectSection(section)"
                             v-if="canManageAcademic && year.status === 'draft'"
+                            v-show="section === 'years'"
                             v-bind="
                                 storePeriod.form([organizationSlug, year.id])
                             "
@@ -729,7 +696,7 @@ defineOptions({
                                     name="sequence"
                                     type="number"
                                     min="1"
-                                    :value="year.periods.length + 1"
+                                    :model-value="year.periods.length + 1"
                                     required
                                 />
                                 <InputError :message="errors.sequence" />
@@ -777,6 +744,7 @@ defineOptions({
             </section>
 
             <aside
+                v-show="section === 'years'"
                 class="flex min-w-0 flex-col gap-4 xl:sticky xl:top-4 xl:self-start"
             >
                 <section
@@ -801,6 +769,7 @@ defineOptions({
                         />
                     </div>
                     <Form
+                        @success="selectSection(section)"
                         v-bind="storeYear.form(organizationSlug)"
                         class="grid gap-3"
                         #default="{ errors, processing }"
@@ -848,90 +817,85 @@ defineOptions({
                         </Button>
                     </Form>
                 </section>
-
-                <section
-                    v-if="canManageAcademic"
-                    class="rounded-lg border border-border/70 bg-card p-5"
-                >
-                    <div class="mb-4 flex items-start gap-3">
-                        <div
-                            class="rounded-lg bg-slate-900 p-2 text-amber-300 dark:bg-slate-800"
-                        >
-                            <Layers3 class="h-4 w-4" />
-                        </div>
-                        <div>
-                            <h2 class="font-semibold">Institution presets</h2>
-                            <p
-                                class="mt-1 text-sm leading-5 text-muted-foreground"
-                            >
-                                Use a familiar starting structure, then rename
-                                or extend it as your institution needs.
-                            </p>
-                        </div>
-                    </div>
-                    <div class="grid gap-2">
-                        <Form
-                            v-for="preset in presets"
-                            :key="preset.value"
-                            v-bind="applyPreset.form(organizationSlug)"
-                            #default="{ processing }"
-                        >
-                            <input
-                                type="hidden"
-                                name="preset"
-                                :value="preset.value"
-                            />
-                            <Button
-                                type="submit"
-                                variant="outline"
-                                class="w-full justify-between"
-                                :disabled="processing"
-                            >
-                                {{ preset.label }}
-                                <ArrowUpRight
-                                    class="h-4 w-4 text-muted-foreground"
-                                />
-                            </Button>
-                        </Form>
-                    </div>
-                </section>
-
-                <section class="rounded-lg border border-border/70 bg-card p-5">
-                    <div class="mb-4 flex items-center justify-between gap-3">
-                        <div>
-                            <h2 class="font-semibold">Structure at a glance</h2>
-                            <p
-                                class="mt-1 text-sm leading-5 text-muted-foreground"
-                            >
-                                Your configurable hierarchy types.
-                            </p>
-                        </div>
-                        <Layers3 class="h-5 w-5 text-amber-500" />
-                    </div>
-                    <div
-                        v-if="unitTypes.length > 0"
-                        class="flex flex-wrap gap-2"
-                    >
-                        <Badge
-                            v-for="type in unitTypes"
-                            :key="type.code"
-                            variant="secondary"
-                        >
-                            {{ type.name }}
-                            <span class="ml-1 text-muted-foreground">{{
-                                type.units_count
-                            }}</span>
-                        </Badge>
-                    </div>
-                    <p v-else class="text-sm leading-5 text-muted-foreground">
-                        Apply a preset to sketch your institution's structure.
-                    </p>
-                </section>
             </aside>
         </div>
 
+        <div v-show="section === 'structure'" class="grid gap-4 lg:grid-cols-2">
+            <section
+                v-if="canManageAcademic"
+                class="rounded-lg border border-border/70 bg-card p-5"
+            >
+                <div class="mb-4 flex items-start gap-3">
+                    <div
+                        class="rounded-lg bg-slate-900 p-2 text-amber-300 dark:bg-slate-800"
+                    >
+                        <Layers3 class="h-4 w-4" />
+                    </div>
+                    <div>
+                        <h2 class="font-semibold">Institution presets</h2>
+                        <p class="mt-1 text-sm leading-5 text-muted-foreground">
+                            Use a familiar starting structure, then rename or
+                            extend it as your institution needs.
+                        </p>
+                    </div>
+                </div>
+                <div class="grid gap-2">
+                    <Form
+                        @success="selectSection(section)"
+                        v-for="preset in presets"
+                        :key="preset.value"
+                        v-bind="applyPreset.form(organizationSlug)"
+                        #default="{ processing }"
+                    >
+                        <input
+                            type="hidden"
+                            name="preset"
+                            :value="preset.value"
+                        />
+                        <Button
+                            type="submit"
+                            variant="outline"
+                            class="w-full justify-between"
+                            :disabled="processing"
+                        >
+                            {{ preset.label }}
+                            <ArrowUpRight
+                                class="h-4 w-4 text-muted-foreground"
+                            />
+                        </Button>
+                    </Form>
+                </div>
+            </section>
+            <section class="rounded-lg border border-border/70 bg-card p-5">
+                <div class="mb-4 flex items-center justify-between gap-3">
+                    <div>
+                        <h2 class="font-semibold">Structure at a glance</h2>
+                        <p class="mt-1 text-sm leading-5 text-muted-foreground">
+                            Your configurable hierarchy types.
+                        </p>
+                    </div>
+                    <Layers3 class="h-5 w-5 text-amber-500" />
+                </div>
+                <div v-if="unitTypes.length > 0" class="flex flex-wrap gap-2">
+                    <Badge
+                        v-for="type in unitTypes"
+                        :key="type.code"
+                        variant="secondary"
+                    >
+                        {{ type.name }}
+                        <span class="ml-1 text-muted-foreground">{{
+                            type.units_count
+                        }}</span>
+                    </Badge>
+                </div>
+                <p v-else class="text-sm leading-5 text-muted-foreground">
+                    Apply a preset to sketch your institution's structure.
+                </p>
+            </section>
+        </div>
         <section
             id="academic-structure"
+            v-show="section === 'structure'"
             class="scroll-mt-6 rounded-lg border border-border/70 bg-card"
         >
             <div
@@ -982,6 +946,7 @@ defineOptions({
                             class="flex max-w-full min-w-0 flex-wrap items-center gap-2 sm:justify-end"
                         >
                             <Form
+                                @success="selectSection(section)"
                                 v-bind="
                                     moveUnit.form([organizationSlug, unit.id])
                                 "
@@ -1017,6 +982,7 @@ defineOptions({
                                 <InputError :message="errors.parent_id" />
                             </Form>
                             <Form
+                                @success="selectSection(section)"
                                 v-bind="
                                     archiveUnit.form([
                                         organizationSlug,
@@ -1048,6 +1014,7 @@ defineOptions({
                 </div>
 
                 <Form
+                    @success="selectSection(section)"
                     v-if="canManageAcademic"
                     v-bind="storeUnit.form(organizationSlug)"
                     class="grid gap-3 rounded-lg border border-amber-500/25 bg-amber-500/[0.06] p-4 dark:bg-amber-500/[0.08]"
@@ -1123,6 +1090,7 @@ defineOptions({
 
         <section
             id="student-groups"
+            v-show="section === 'groups'"
             class="scroll-mt-6 rounded-lg border border-border/70 bg-card"
         >
             <div
@@ -1179,6 +1147,7 @@ defineOptions({
                         class="mt-4 grid gap-3 border-t border-border/70 pt-4"
                     >
                         <Form
+                            @success="selectSection(section)"
                             v-bind="
                                 updateGroupDates.form([
                                     organizationSlug,
@@ -1198,7 +1167,9 @@ defineOptions({
                                     type="date"
                                     :min="group.year_starts_on"
                                     :max="group.year_ends_on"
-                                    :value="group.active_from || undefined"
+                                    :model-value="
+                                        group.active_from || undefined
+                                    "
                                 />
                             </div>
                             <div class="grid gap-2">
@@ -1211,7 +1182,9 @@ defineOptions({
                                     type="date"
                                     :min="group.year_starts_on"
                                     :max="group.year_ends_on"
-                                    :value="group.active_until || undefined"
+                                    :model-value="
+                                        group.active_until || undefined
+                                    "
                                 />
                             </div>
                             <Button
@@ -1232,6 +1205,7 @@ defineOptions({
                         </Form>
 
                         <Form
+                            @success="selectSection(section)"
                             v-bind="
                                 assignGroupUnit.form([
                                     organizationSlug,
@@ -1275,6 +1249,7 @@ defineOptions({
 
                         <div class="flex flex-wrap gap-2">
                             <Form
+                                @success="selectSection(section)"
                                 v-for="period in group.periods"
                                 :key="period.id"
                                 v-bind="

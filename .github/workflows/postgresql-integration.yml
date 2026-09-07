@@ -74,6 +74,7 @@ jobs:
           psql --host="$DB_HOST" --username=postgres --dbname="$DB_DATABASE" --set=ON_ERROR_STOP=1 <<'SQL'
           REASSIGN OWNED BY talasched_migrator TO talasched_owner;
           GRANT USAGE, CREATE ON SCHEMA public TO talasched_migrator;
+          GRANT SELECT ON audit_events TO talasched_migrator;
           GRANT USAGE ON SCHEMA public TO talasched_app;
           GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO talasched_app;
           GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO talasched_app;

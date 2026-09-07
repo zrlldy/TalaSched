@@ -25,8 +25,16 @@ declare module '@inertiajs/core' {
             sidebarOpen: boolean;
             currentOrganization: Organization | null;
             organizations: Organization[];
+            organizationTimezone: string | null;
             entitlements: OrganizationEntitlements;
             canManageSubscription: boolean;
+            canViewAudit: boolean;
+            canManageTemplates: boolean;
+            workspacePermissions: {
+                academic: boolean;
+                resources: boolean;
+                catalog: boolean;
+            };
             [key: string]: unknown;
         };
     }

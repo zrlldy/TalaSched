@@ -43,7 +43,7 @@ return Application::configure(basePath: dirname(__DIR__))
         );
 
         $exceptions->render(function (ValidationException $exception, Request $request): ?JsonResponse {
-            if (! $request->routeIs('scheduling.*')) {
+            if (! $request->routeIs('scheduling.*') || $request->routeIs('scheduling.timetables.index', 'scheduling.timetables.store') && ! $request->expectsJson()) {
                 return null;
             }
 
@@ -68,7 +68,7 @@ return Application::configure(basePath: dirname(__DIR__))
         });
 
         $exceptions->render(function (AuthenticationException $exception, Request $request): ?JsonResponse {
-            if (! $request->routeIs('scheduling.*')) {
+            if (! $request->routeIs('scheduling.*') || $request->routeIs('scheduling.timetables.index', 'scheduling.timetables.store') && ! $request->expectsJson()) {
                 return null;
             }
 
@@ -76,7 +76,7 @@ return Application::configure(basePath: dirname(__DIR__))
         });
 
         $exceptions->render(function (HttpExceptionInterface $exception, Request $request): ?JsonResponse {
-            if (! $request->routeIs('scheduling.*')) {
+            if (! $request->routeIs('scheduling.*') || $request->routeIs('scheduling.timetables.index', 'scheduling.timetables.store') && ! $request->expectsJson()) {
                 return null;
             }
 

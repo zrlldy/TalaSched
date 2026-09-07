@@ -14,7 +14,17 @@ import {
     SlidersHorizontal,
     X,
 } from '@lucide/vue';
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import {
+    computed,
+    nextTick,
+    onMounted,
+    onUnmounted,
+    reactive,
+    ref,
+    watch,
+} from 'vue';
+import MinuteTimeInput from '@/components/MinuteTimeInput.vue';
+import AddScheduleEntry from '@/components/scheduling/AddScheduleEntry.vue';
 import SchedulingConflictList from '@/components/scheduling/SchedulingConflictList.vue';
 import TimetableVersionPanel from '@/components/scheduling/TimetableVersionPanel.vue';
 import TimetableVersionStatusBadge from '@/components/scheduling/TimetableVersionStatus.vue';
@@ -23,11 +33,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import WorkspaceState from '@/components/WorkspaceState.vue';
+import { saveScheduleEntry, schedulingError } from '@/lib/scheduling';
 import { dashboard } from '@/routes';
-import { update, validate } from '@/routes/scheduling/entries';
+import { update } from '@/routes/scheduling/entries';
 import { views } from '@/routes/scheduling/timetables';
 import type {
     ScheduleIssue,
+    ScheduleOfferingOption,
     TimetableVersionStatus,
     TimetableView,
     TimetableViewEntry,
@@ -65,6 +77,7 @@ type Props = {
     canManageScheduling: boolean;
     canManageVersions: boolean;
     canSubmitVersions: boolean;
+    offeringComponents: ScheduleOfferingOption[];
 };
 type ViewResponse = {
     data: { type: string; attributes: TimetableView };
@@ -72,24 +85,11 @@ type ViewResponse = {
 type EntryPayload = {
     lock_version: number;
     weekday: number;
-    starts_at_minute: number;
-    ends_at_minute: number;
+    starts_at_minute: number | '';
+    ends_at_minute: number | '';
     delivery_mode: string;
     notes: string | null;
     resources: { resource_id: string; role: string }[];
-};
-type ValidationPayload = EntryPayload & {
-    timetable_version_id: string;
-    offering_component_id: string;
-};
-type ValidationResponse = {
-    data: {
-        attributes: {
-            valid: boolean;
-            issues: ScheduleIssue[];
-            score: number;
-        };
-    };
 };
 type PaletteCommand = {
     label: string;
@@ -110,7 +110,7 @@ const selectedEntryId = ref<string | null>(props.view.entries[0]?.id ?? null);
 const loadError = ref<string | null>(null);
 const updateError = ref<string | null>(null);
 const validationIssues = ref<ScheduleIssue[]>([]);
-const validationScore = ref<number | null>(null);
+const saveNotice = ref('');
 const commandPaletteOpen = ref(false);
 const commandQuery = ref('');
 const commandInput = ref<HTMLInputElement | null>(null);
@@ -118,18 +118,8 @@ const commandTrigger = ref<HTMLButtonElement | null>(null);
 const lastFocusedElement = ref<HTMLElement | null>(null);
 
 const viewHttp = useHttp<Record<string, never>, ViewResponse>({});
-const entryHttp = useHttp<EntryPayload, { data: unknown }>({
-    lock_version: 1,
-    weekday: 1,
-    starts_at_minute: 480,
-    ends_at_minute: 570,
-    delivery_mode: 'physical',
-    notes: null,
-    resources: [],
-});
-const validationHttp = useHttp<ValidationPayload, ValidationResponse>({
-    timetable_version_id: '',
-    offering_component_id: '',
+const saving = ref(false);
+const entryForm = reactive<EntryPayload>({
     lock_version: 1,
     weekday: 1,
     starts_at_minute: 480,
@@ -169,10 +159,17 @@ const selectedEntry = computed(
 const selectedEntryExceptions = computed(
     () => selectedEntry.value?.exceptions ?? [],
 );
-const canEditSelectedEntry = computed(
+const canEditVersion = computed(
     () =>
         props.canManageScheduling &&
         currentView.value.date === null &&
+        ['draft', 'changes_requested'].includes(
+            currentView.value.context.version.status,
+        ),
+);
+const canEditSelectedEntry = computed(
+    () =>
+        canEditVersion.value &&
         selectedEntry.value !== null &&
         selectedEntry.value.status !== 'cancelled',
 );
@@ -194,7 +191,7 @@ const gridStart = computed(() => {
         .map((entry) => entry.starts_at_minute)
         .filter((minute): minute is number => minute !== null);
 
-    return Math.max(
+    return Math.min(
         420,
         times.length > 0 ? Math.floor(Math.min(...times) / 60) * 60 : 420,
     );
@@ -204,8 +201,8 @@ const gridEnd = computed(() => {
         .map((entry) => entry.ends_at_minute)
         .filter((minute): minute is number => minute !== null);
 
-    return Math.min(
-        1320,
+    return Math.max(
+        1140,
         times.length > 0 ? Math.ceil(Math.max(...times) / 60) * 60 : 1140,
     );
 });
@@ -270,6 +267,10 @@ const formatMinutes = (minutes: number | null): string => {
         return 'No time';
     }
 
+    if (minutes === 1440) {
+        return 'Midnight';
+    }
+
     const hours = Math.floor(minutes / 60);
     const remainder = minutes % 60;
     const suffix = hours >= 12 ? 'PM' : 'AM';
@@ -309,7 +310,7 @@ const optionLabel = (option: Option): string =>
 const syncEditorFromEntry = (entry: TimetableViewEntry | null): void => {
     if (entry === null) {
         validationIssues.value = [];
-        validationScore.value = null;
+        saveNotice.value = '';
 
         return;
     }
@@ -326,18 +327,20 @@ const syncEditorFromEntry = (entry: TimetableViewEntry | null): void => {
             role: resource.role,
         })),
     };
-    Object.assign(entryHttp, payload);
-    Object.assign(validationHttp, {
-        ...payload,
-        timetable_version_id: currentView.value.context.version.id,
-        offering_component_id: entry.offering.component.id,
-    });
+    Object.assign(entryForm, payload);
     validationIssues.value = [];
-    validationScore.value = null;
+    saveNotice.value = '';
     updateError.value = null;
 };
 
 watch(selectedEntry, syncEditorFromEntry, { immediate: true });
+watch(
+    () => ({ ...entryForm }),
+    () => {
+        saveNotice.value = '';
+    },
+    { deep: true },
+);
 watch(currentView, (view) => {
     if (!view.entries.some((entry) => entry.id === selectedEntryId.value)) {
         selectedEntryId.value = view.entries[0]?.id ?? null;
@@ -420,56 +423,42 @@ const selectEntry = (entry: TimetableViewEntry): void => {
     selectedEntryId.value = entry.id;
 };
 
-const validateSelectedEntry = async (): Promise<boolean> => {
-    const entry = selectedEntry.value;
-
-    if (entry === null || entry.status === 'cancelled') {
-        return false;
-    }
-
-    validationIssues.value = [];
-    validationScore.value = null;
-
-    try {
-        const response = await validationHttp.post(
-            validate.url(organizationSlug.value),
-        );
-        validationIssues.value = response.data.attributes.issues;
-        validationScore.value = response.data.attributes.score;
-
-        return response.data.attributes.valid;
-    } catch (error) {
-        updateError.value =
-            error instanceof Error
-                ? error.message
-                : 'The entry could not be validated.';
-
-        return false;
-    }
-};
 const saveSelectedEntry = async (): Promise<void> => {
     const entry = selectedEntry.value;
 
-    if (entry === null || !canEditSelectedEntry.value) {
+    if (entry === null || !canEditSelectedEntry.value || saving.value) {
         return;
     }
 
     updateError.value = null;
-    const isValid = await validateSelectedEntry();
+    validationIssues.value = [];
+    saveNotice.value = '';
 
-    if (!isValid) {
-        return;
-    }
+    saving.value = true;
 
     try {
-        await entryHttp.patch(update.url([organizationSlug.value, entry.id]));
+        await saveScheduleEntry(
+            update([organizationSlug.value, entry.id]),
+            entryForm,
+        );
         await refreshView();
+        await nextTick();
+        saveNotice.value = 'Class saved. Conflict checks passed.';
     } catch (error) {
-        updateError.value =
-            error instanceof Error
-                ? error.message
-                : 'The entry could not be saved.';
+        const failure = schedulingError(error);
+        updateError.value = failure.message;
+        validationIssues.value = failure.issues;
+    } finally {
+        saving.value = false;
     }
+};
+const handleEntryCreated = async (id: string): Promise<void> => {
+    selectedScope.value = 'organization';
+    selectedResourceId.value = null;
+    selectedUnitId.value = null;
+    selectedEntryId.value = id;
+    await refreshView();
+    router.reload({ only: ['versions'] });
 };
 
 const closeCommandPalette = (): void => {
@@ -538,7 +527,7 @@ const runFirstCommand = (): void => {
 const handleGlobalKeydown = (event: KeyboardEvent): void => {
     const modifierPressed = event.metaKey || event.ctrlKey;
 
-    if (modifierPressed && event.key.toLowerCase() === 'k') {
+    if (modifierPressed && event.shiftKey && event.key.toLowerCase() === 'k') {
         event.preventDefault();
 
         if (commandPaletteOpen.value) {
@@ -638,6 +627,18 @@ defineOptions({
             </div>
 
             <div class="flex items-center gap-2 self-start xl:self-auto">
+                <AddScheduleEntry
+                    v-if="canEditVersion"
+                    :key="currentView.context.version.id"
+                    :organization-slug="organizationSlug"
+                    :version-id="currentView.context.version.id"
+                    :timezone="currentView.context.organization.timezone"
+                    :offerings="offeringComponents"
+                    :rooms="
+                        resources.filter((resource) => resource.type === 'room')
+                    "
+                    @created="handleEntryCreated"
+                />
                 <Button
                     ref="commandTrigger"
                     variant="outline"
@@ -650,7 +651,7 @@ defineOptions({
                     <span>Commands</span>
                     <kbd
                         class="hidden rounded border border-border bg-muted px-1.5 py-0.5 font-schedule text-[0.625rem] text-muted-foreground sm:inline"
-                        >⌘K</kbd
+                        >⇧⌘K</kbd
                     >
                 </Button>
                 <Button
@@ -675,7 +676,7 @@ defineOptions({
                     :class="
                         validationIssues.length > 0
                             ? 'text-conflict'
-                            : validationScore !== null
+                            : saveNotice
                               ? 'text-available'
                               : 'text-warning'
                     "
@@ -687,7 +688,7 @@ defineOptions({
                         :class="
                             validationIssues.length > 0
                                 ? 'bg-conflict'
-                                : validationScore !== null
+                                : saveNotice
                                   ? 'bg-available'
                                   : 'bg-warning'
                         "
@@ -698,7 +699,7 @@ defineOptions({
                     :class="
                         validationIssues.length > 0
                             ? 'text-conflict'
-                            : validationScore !== null
+                            : saveNotice
                               ? 'text-available'
                               : 'text-warning'
                     "
@@ -706,8 +707,8 @@ defineOptions({
                     {{
                         validationIssues.length > 0
                             ? `${validationIssues.length} conflict${validationIssues.length === 1 ? '' : 's'} found`
-                            : validationScore !== null
-                              ? 'No conflicts found'
+                            : saveNotice
+                              ? 'Class saved'
                               : 'Conflicts checked before save'
                     }}
                 </span>
@@ -1322,46 +1323,50 @@ defineOptions({
                             class="mt-3 grid gap-3"
                             @submit.prevent="saveSelectedEntry"
                         >
+                            <div class="grid gap-1.5">
+                                <Label for="entry-weekday">Weekday</Label>
+                                <select
+                                    id="entry-weekday"
+                                    v-model.number="entryForm.weekday"
+                                    :disabled="!canEditSelectedEntry || saving"
+                                    class="h-10 w-full rounded-md border border-input bg-background px-3 text-sm disabled:opacity-50"
+                                >
+                                    <option
+                                        v-for="day in weekdays"
+                                        :key="day.value"
+                                        :value="day.value"
+                                    >
+                                        {{ day.name }}
+                                    </option>
+                                </select>
+                            </div>
                             <div class="grid grid-cols-2 gap-2">
-                                <div>
-                                    <Label for="entry-start"
-                                        >Starts (minute)</Label
-                                    ><Input
-                                        id="entry-start"
-                                        v-model.number="
-                                            entryHttp.starts_at_minute
-                                        "
-                                        class="mt-1.5"
-                                        type="number"
-                                        min="0"
-                                        max="1439"
-                                        step="1"
-                                        :disabled="!canEditSelectedEntry"
-                                    />
-                                </div>
-                                <div>
-                                    <Label for="entry-end">Ends (minute)</Label
-                                    ><Input
-                                        id="entry-end"
-                                        v-model.number="
-                                            entryHttp.ends_at_minute
-                                        "
-                                        class="mt-1.5"
-                                        type="number"
-                                        min="1"
-                                        max="1440"
-                                        step="1"
-                                        :disabled="!canEditSelectedEntry"
-                                    />
-                                </div>
+                                <MinuteTimeInput
+                                    id="entry-start"
+                                    v-model="entryForm.starts_at_minute"
+                                    name="starts_at_minute"
+                                    label="Start time"
+                                    required
+                                    :disabled="!canEditSelectedEntry || saving"
+                                />
+                                <MinuteTimeInput
+                                    id="entry-end"
+                                    v-model="entryForm.ends_at_minute"
+                                    name="ends_at_minute"
+                                    label="End time"
+                                    required
+                                    allow-end-of-day
+                                    :disabled="!canEditSelectedEntry || saving"
+                                />
                             </div>
                             <div>
                                 <Label for="entry-notes">Notes</Label
                                 ><textarea
                                     id="entry-notes"
-                                    v-model="entryHttp.notes"
+                                    v-model="entryForm.notes"
                                     class="mt-1.5 min-h-16 w-full rounded-md border border-input bg-background px-3 py-2 text-sm transition outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
-                                    :disabled="!canEditSelectedEntry"
+                                    :disabled="!canEditSelectedEntry || saving"
+                                    maxlength="2000"
                                 />
                             </div>
                             <p
@@ -1388,13 +1393,18 @@ defineOptions({
                                 organization role cannot edit schedules.
                             </p>
                             <p
-                                v-if="
-                                    validationScore !== null &&
-                                    validationIssues.length === 0
-                                "
-                                class="text-xs text-available"
+                                v-else-if="!canEditVersion"
+                                class="text-xs text-muted-foreground"
                             >
-                                Validated with score {{ validationScore }}.
+                                This version is read-only. Create a draft from
+                                version controls to make changes.
+                            </p>
+                            <p
+                                v-if="saveNotice"
+                                class="text-xs text-available"
+                                role="status"
+                            >
+                                {{ saveNotice }}
                             </p>
                             <p
                                 v-if="updateError"
@@ -1406,23 +1416,12 @@ defineOptions({
                             <Button
                                 class="w-full"
                                 type="submit"
-                                :disabled="
-                                    !canEditSelectedEntry ||
-                                    entryHttp.processing ||
-                                    validationHttp.processing
-                                "
+                                :disabled="!canEditSelectedEntry || saving"
                                 ><RefreshCw
-                                    v-if="
-                                        entryHttp.processing ||
-                                        validationHttp.processing
-                                    "
+                                    v-if="saving"
                                     class="size-4 animate-spin"
                                 /><Save v-else class="size-4" />{{
-                                    entryHttp.processing
-                                        ? 'Saving'
-                                        : validationHttp.processing
-                                          ? 'Checking'
-                                          : 'Check and save'
+                                    saving ? 'Saving' : 'Check and save'
                                 }}</Button
                             >
                         </form>

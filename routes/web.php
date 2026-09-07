@@ -2,11 +2,14 @@
 
 use App\Http\Controllers\AcademicSetupController;
 use App\Http\Controllers\Approvals\ApprovalController;
+use App\Http\Controllers\AuditController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\ExcelTemplateController;
 use App\Http\Controllers\Organizations\OrganizationInvitationController;
 use App\Http\Controllers\ResourceSetupController;
 use App\Http\Controllers\Scheduling\ScheduleEntryController;
 use App\Http\Controllers\Scheduling\ScheduleExceptionController;
+use App\Http\Controllers\Scheduling\TimetableController;
 use App\Http\Controllers\Scheduling\TimetableVersionComparisonController;
 use App\Http\Controllers\Scheduling\TimetableVersionController;
 use App\Http\Controllers\Scheduling\TimetableViewController;
@@ -32,6 +35,8 @@ Route::prefix('{current_organization}')
         Route::post('catalog/subjects', [ResourceSetupController::class, 'storeSubject'])->name('catalog.subjects.store');
         Route::post('catalog/components', [ResourceSetupController::class, 'storeSubjectComponent'])->name('catalog.components.store');
         Route::post('catalog/offerings', [ResourceSetupController::class, 'storeOffering'])->name('catalog.offerings.store');
+        Route::post('catalog/offerings/instructors', [ResourceSetupController::class, 'assignOfferingInstructor'])->name('catalog.offerings.instructors');
+        Route::post('catalog/offerings/status', [ResourceSetupController::class, 'updateOfferingStatus'])->name('catalog.offerings.status');
         Route::post('academic/years', [AcademicSetupController::class, 'storeYear'])->name('academic.years.store');
         Route::post('academic/years/{academic_year}/periods', [AcademicSetupController::class, 'storePeriod'])->name('academic.periods.store');
         Route::post('academic/years/{academic_year}/activate', [AcademicSetupController::class, 'activate'])->name('academic.years.activate');
@@ -54,6 +59,8 @@ Route::prefix('{current_organization}')
         Route::patch('scheduling/entries/{schedule_entry}', [ScheduleEntryController::class, 'update'])->name('scheduling.entries.update');
         Route::delete('scheduling/entries/{schedule_entry}', [ScheduleEntryController::class, 'destroy'])->name('scheduling.entries.destroy');
         Route::post('scheduling/entries/{schedule_entry}/exceptions', [ScheduleExceptionController::class, 'store'])->name('scheduling.exceptions.store');
+        Route::get('scheduling/timetables', [TimetableController::class, 'index'])->name('scheduling.timetables.index');
+        Route::post('scheduling/timetables', [TimetableController::class, 'store'])->name('scheduling.timetables.store');
         Route::get('scheduling/timetables/{timetable}', [TimetableWorkspaceController::class, 'show'])->name('scheduling.timetables.show');
         Route::get('scheduling/timetables/{timetable}/views', [TimetableViewController::class, 'show'])->name('scheduling.timetables.views');
         Route::get('scheduling/timetables/{timetable}/versions/compare', [TimetableVersionComparisonController::class, 'show'])->name('scheduling.timetables.versions.compare');
@@ -77,7 +84,21 @@ Route::prefix('{current_organization}')
         Route::post('approvals/signatories/{signatory_profile}', [ApprovalController::class, 'updateSignatory'])
             ->middleware('throttle:uploads')
             ->name('approvals.signatories.update');
+        Route::get('templates', [ExcelTemplateController::class, 'index'])->name('templates.index');
+        Route::post('templates/workbooks', [ExcelTemplateController::class, 'storeWorkbook'])
+            ->middleware('throttle:uploads')
+            ->name('templates.workbooks.store');
+        Route::post('templates/versions', [ExcelTemplateController::class, 'storeVersion'])->name('templates.versions.store');
+        Route::post('templates/versions/{excel_template_version}/activate', [ExcelTemplateController::class, 'activateVersion'])
+            ->name('templates.versions.activate');
+        Route::post('templates/exports', [ExcelTemplateController::class, 'storeExport'])
+            ->middleware('throttle:template-exports')
+            ->name('templates.exports.store');
+        Route::get('templates/exports/{export_run}/download', [ExcelTemplateController::class, 'download'])
+            ->middleware('signed')
+            ->name('templates.exports.download');
         Route::get('subscriptions', [SubscriptionController::class, 'show'])->name('subscriptions.show');
+        Route::get('audit', [AuditController::class, 'index'])->name('audits.index');
     });
 
 Route::middleware(['auth'])->group(function () {

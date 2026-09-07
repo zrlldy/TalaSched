@@ -2,6 +2,11 @@
 
 namespace App\Http\Middleware;
 
+use App\Models\AcademicYear;
+use App\Models\AuditEvent;
+use App\Models\ExcelTemplate;
+use App\Models\FacultyProfile;
+use App\Models\Subject;
 use App\Subscriptions\CapabilityGuard;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
@@ -49,11 +54,21 @@ class HandleInertiaRequests extends Middleware
             'sidebarOpen' => ! $request->hasCookie('sidebar_state') || $request->cookie('sidebar_state') === 'true',
             'currentOrganization' => fn () => $user?->currentOrganization ? $user->toUserOrganization($user->currentOrganization) : null,
             'organizations' => fn () => $user?->toUserOrganizations(includeCurrent: true) ?? [],
+            'organizationTimezone' => fn (): ?string => $user?->currentOrganization?->timezone,
             'entitlements' => fn (): array => $user?->currentOrganization
                 ? $this->capabilities->values($user->currentOrganization)
                 : [],
             'canManageSubscription' => fn (): bool => $user?->currentOrganization !== null
                 && $user->can('update', $user->currentOrganization),
+            'canViewAudit' => fn (): bool => $user?->currentOrganization !== null
+                && $user->can('viewAny', [AuditEvent::class, $user->currentOrganization]),
+            'canManageTemplates' => fn (): bool => $user?->currentOrganization !== null
+                && $user->can('viewAny', [ExcelTemplate::class, $user->currentOrganization]),
+            'workspacePermissions' => fn (): array => [
+                'academic' => $user?->currentOrganization !== null && $user->can('create', [AcademicYear::class, $user->currentOrganization]),
+                'resources' => $user?->currentOrganization !== null && $user->can('create', [FacultyProfile::class, $user->currentOrganization]),
+                'catalog' => $user?->currentOrganization !== null && $user->can('create', [Subject::class, $user->currentOrganization]),
+            ],
         ];
     }
 }

@@ -7,6 +7,7 @@ import {
     SidebarMenuButton,
     SidebarMenuItem,
 } from '@/components/ui/sidebar';
+import { useSidebar } from '@/components/ui/sidebar';
 import { useCurrentUrl } from '@/composables/useCurrentUrl';
 import type { NavGroup } from '@/types';
 
@@ -15,6 +16,7 @@ defineProps<{
 }>();
 
 const { isCurrentUrl } = useCurrentUrl();
+const { setOpenMobile } = useSidebar();
 </script>
 
 <template>
@@ -24,10 +26,19 @@ const { isCurrentUrl } = useCurrentUrl();
             <SidebarMenuItem v-for="item in group.items" :key="item.title">
                 <SidebarMenuButton
                     as-child
-                    :is-active="isCurrentUrl(item.href)"
+                    :is-active="item.isActive ?? isCurrentUrl(item.href)"
                     :tooltip="item.title"
+                    class="min-h-10"
                 >
-                    <Link :href="item.href">
+                    <Link
+                        :href="item.href"
+                        :aria-current="
+                            (item.isActive ?? isCurrentUrl(item.href))
+                                ? 'page'
+                                : undefined
+                        "
+                        @click="setOpenMobile(false)"
+                    >
                         <component :is="item.icon" />
                         <span>{{ item.title }}</span>
                     </Link>

@@ -50,7 +50,7 @@ test('tenant-owned policies distinguish membership from mutation permission', fu
     $organization = $owner->currentOrganization;
     $otherOrganization = Organization::factory()->create();
 
-    if ($model === ScheduleEntry::class) {
+    if ($model === ScheduleEntry::class || $model === Timetable::class) {
         grantManualSchedulingEntitlement($organization);
     }
 

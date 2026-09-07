@@ -2,9 +2,12 @@
 
 namespace App\Http\Controllers\Scheduling;
 
+use App\Enums\SubjectOfferingStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Scheduling\TimetableViewRequest;
 use App\Models\AcademicUnit;
+use App\Models\FacultyProfile;
+use App\Models\OfferingComponent;
 use App\Models\Organization;
 use App\Models\ScheduleEntry;
 use App\Models\SchedulingResource;
@@ -26,6 +29,7 @@ class TimetableWorkspaceController extends Controller
         $filters = $request->filters();
         $view = $query->handle($currentOrganization, $timetable, $filters);
         $viewAttributes = $this->viewAttributes($view);
+        $canManageScheduling = $request->user()?->can('create', [ScheduleEntry::class, $currentOrganization]) === true;
 
         $versions = TimetableVersion::query()
             ->withCount('entries')
@@ -92,6 +96,36 @@ class TimetableWorkspaceController extends Controller
                 ->values()
                 ->all(),
             'versionWorkflows' => $versionWorkflows,
+            'offeringComponents' => $canManageScheduling ? OfferingComponent::query()
+                ->where('organization_id', $currentOrganization->getKey())
+                ->whereHas('offering', fn ($query) => $query
+                    ->where('organization_id', $currentOrganization->getKey())
+                    ->where('academic_period_id', $timetable->academic_period_id)
+                    ->where('status', SubjectOfferingStatus::Active))
+                ->whereHas('offering.studentGroup.resource', fn ($query) => $query->where('is_active', true))
+                ->with([
+                    'offering.subject', 'offering.studentGroup.resource',
+                    'instructors' => fn ($query) => $query
+                        ->where('faculty_profiles.organization_id', $currentOrganization->getKey())
+                        ->whereHas('resource', fn ($query) => $query->where('is_active', true))
+                        ->with('resource'),
+                ])
+                ->orderBy('id')
+                ->get()
+                ->map(fn (OfferingComponent $component): array => [
+                    'id' => $component->public_id,
+                    'name' => $component->offering->subject->code.' - '.$component->offering->subject->name.' / '.$component->name,
+                    'group' => [
+                        'id' => $component->offering->studentGroup->resource->public_id,
+                        'name' => $component->offering->studentGroup->name,
+                    ],
+                    'instructors' => $component->instructors->map(fn (FacultyProfile $faculty): array => [
+                        'id' => $faculty->resource->public_id,
+                        'name' => $faculty->resource->name,
+                    ])->values()->all(),
+                    'duration_minutes' => $component->duration_minutes,
+                    'delivery_mode' => $component->delivery_mode->value,
+                ])->values()->all() : [],
             'canManageVersions' => $canManageVersions,
             'canSubmitVersions' => $canSubmitVersions,
             'resources' => SchedulingResource::query()
@@ -118,7 +152,7 @@ class TimetableWorkspaceController extends Controller
                 ])
                 ->values()
                 ->all(),
-            'canManageScheduling' => $request->user()?->can('create', [ScheduleEntry::class, $currentOrganization]) === true,
+            'canManageScheduling' => $canManageScheduling,
         ]);
     }
 

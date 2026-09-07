@@ -11,9 +11,11 @@ use App\Enums\FacultyEmploymentType;
 use App\Enums\ResourceType;
 use App\Enums\SubjectComponentKind;
 use App\Enums\SubjectOfferingStatus;
+use App\Http\Requests\Catalog\AssignOfferingInstructorRequest;
 use App\Http\Requests\Catalog\StoreSubjectComponentRequest;
 use App\Http\Requests\Catalog\StoreSubjectOfferingRequest;
 use App\Http\Requests\Catalog\StoreSubjectRequest;
+use App\Http\Requests\Catalog\UpdateOfferingStatusRequest;
 use App\Http\Requests\Resources\StoreAvailabilityRuleRequest;
 use App\Http\Requests\Resources\StoreBuildingRequest;
 use App\Http\Requests\Resources\StoreFacultyProfileRequest;
@@ -25,6 +27,7 @@ use App\Models\AcademicUnit;
 use App\Models\Building;
 use App\Models\FacultyProfile;
 use App\Models\Feature;
+use App\Models\OfferingComponent;
 use App\Models\Organization;
 use App\Models\Room;
 use App\Models\RoomType;
@@ -201,7 +204,7 @@ class ResourceSetupController extends Controller
 
         $offerings = SubjectOffering::query()
             ->where('organization_id', $organizationId)
-            ->with(['subject', 'academicPeriod', 'studentGroup', 'components'])
+            ->with(['subject', 'academicPeriod', 'studentGroup', 'components.instructors.resource'])
             ->orderByDesc('id')
             ->limit(100)
             ->get()
@@ -214,6 +217,14 @@ class ResourceSetupController extends Controller
                 'expected_enrollment' => $offering->expected_enrollment,
                 'status' => $offering->status->value,
                 'components_count' => $offering->components->count(),
+                'components' => $offering->components->map(fn (OfferingComponent $component): array => [
+                    'id' => $component->public_id,
+                    'name' => $component->name,
+                    'instructors' => $component->instructors->map(fn (FacultyProfile $faculty): array => [
+                        'id' => $faculty->public_id,
+                        'name' => $faculty->resource->name,
+                    ])->values()->all(),
+                ])->values()->all(),
             ])->values()->all();
 
         return Inertia::render('resources/Setup', [
@@ -393,6 +404,38 @@ class ResourceSetupController extends Controller
         }
 
         return $this->redirectWithMessage($currentOrganization, 'Subject component created.');
+    }
+
+    public function assignOfferingInstructor(AssignOfferingInstructorRequest $request, Organization $currentOrganization, SubjectOfferingService $service): RedirectResponse
+    {
+        $component = OfferingComponent::query()
+            ->where('organization_id', $currentOrganization->getKey())
+            ->where('public_id', $request->validated('offering_component_id'))
+            ->firstOrFail();
+        Gate::forUser($request->user())->authorize('update', $component);
+        $faculty = FacultyProfile::query()
+            ->where('organization_id', $currentOrganization->getKey())
+            ->where('public_id', $request->validated('faculty_profile_id'))
+            ->firstOrFail();
+        $service->assignInstructor($currentOrganization, $component, $faculty, (int) $request->validated('load_percentage'), actor: $request->user());
+
+        Inertia::flash('toast', ['type' => 'success', 'message' => 'Eligible instructor assigned.']);
+
+        return to_route('resources.setup', [$currentOrganization, 'section' => 'offerings']);
+    }
+
+    public function updateOfferingStatus(UpdateOfferingStatusRequest $request, Organization $currentOrganization, SubjectOfferingService $service): RedirectResponse
+    {
+        $offering = SubjectOffering::query()
+            ->where('organization_id', $currentOrganization->getKey())
+            ->where('public_id', $request->validated('offering_id'))
+            ->firstOrFail();
+        Gate::forUser($request->user())->authorize('update', $offering);
+        $service->updateStatus($currentOrganization, $offering, SubjectOfferingStatus::from($request->validated('status')), $request->user());
+
+        Inertia::flash('toast', ['type' => 'success', 'message' => 'Offering status updated.']);
+
+        return to_route('resources.setup', [$currentOrganization, 'section' => 'offerings']);
     }
 
     public function storeOffering(StoreSubjectOfferingRequest $request, Organization $currentOrganization, SubjectOfferingService $service): RedirectResponse

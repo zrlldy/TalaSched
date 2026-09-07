@@ -49,7 +49,9 @@ test('billing webhook claims are replay safe and transition explicitly', functio
         ->where('provider', 'fake')
         ->where('external_id', 'evt_1')
         ->value('status'))->toBe('processed')
-        ->and($ledger->claim($webhook))->toBeFalse();
+        ->and($ledger->claim($webhook))->toBeFalse()
+        ->and(DB::table('audit_events')->where('action', 'billing_webhook.claimed')->count())->toBe(1)
+        ->and(DB::table('audit_events')->where('action', 'billing_webhook.processed')->count())->toBe(1);
 });
 
 test('failed billing webhook claims may be retried and changed payloads conflict', function (): void {
@@ -63,6 +65,18 @@ test('failed billing webhook claims may be retried and changed payloads conflict
         ->and(DB::table('billing_webhook_events')
             ->where('external_id', 'evt_2')
             ->value('attempts'))->toBe(2);
+
+    $failedAudit = DB::table('audit_events')->where('action', 'billing_webhook.failed')->first();
+
+    expect($failedAudit)->not->toBeNull()
+        ->and(json_decode((string) $failedAudit->after, true, flags: JSON_THROW_ON_ERROR))->toBe([
+            'attempts' => 1,
+            'event_type' => 'subscription.updated',
+            'payload_hash' => $webhook->payloadHash(),
+            'provider' => 'fake',
+            'status' => 'failed',
+        ])
+        ->and(DB::table('audit_events')->where('action', 'billing_webhook.reclaimed')->count())->toBe(1);
 
     $conflictingWebhook = new BillingWebhook('fake', 'evt_2', 'subscription.updated', ['status' => 'active']);
 
