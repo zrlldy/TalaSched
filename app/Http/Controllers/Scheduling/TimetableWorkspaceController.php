@@ -11,6 +11,7 @@ use App\Models\OfferingComponent;
 use App\Models\Organization;
 use App\Models\ScheduleEntry;
 use App\Models\SchedulingResource;
+use App\Models\SubjectOffering;
 use App\Models\TimetableVersion;
 use App\Scheduling\TimetableViewData;
 use App\Scheduling\TimetableViewQuery;
@@ -96,6 +97,12 @@ class TimetableWorkspaceController extends Controller
                 ->values()
                 ->all(),
             'versionWorkflows' => $versionWorkflows,
+            'emptyOfferingCount' => $canManageScheduling ? SubjectOffering::query()
+                ->where('organization_id', $currentOrganization->getKey())
+                ->where('academic_period_id', $timetable->academic_period_id)
+                ->where('status', SubjectOfferingStatus::Active)
+                ->doesntHave('components')
+                ->count() : 0,
             'offeringComponents' => $canManageScheduling ? OfferingComponent::query()
                 ->where('organization_id', $currentOrganization->getKey())
                 ->whereHas('offering', fn ($query) => $query

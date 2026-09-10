@@ -41,6 +41,7 @@ test('template management exposes a clean workbook mapper and saves immutable dr
             ->where('uploadedWorkbook.scan_status', FileAsset::ScanClean)
             ->where('uploadedWorkbook.inspection.0.name', 'Schedule')
             ->where('canManageTemplates', true)
+            ->where('canCreateTemplateVersions', true)
             ->has('placeholderCatalog', 9));
 
     $this->actingAs($this->owner)
@@ -157,6 +158,18 @@ test('template commands stay unavailable to members without scheduling permissio
             'mapping' => templateManagementMapping(),
         ])
         ->assertForbidden();
+});
+
+test('template navigation remains available when the organization cannot create template versions', function (): void {
+    $owner = User::factory()->withOwnedOrganization()->create();
+
+    $this->actingAs($owner)
+        ->get(route('templates.index', $owner->currentOrganization))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page): Assert => $page
+            ->component('templates/Index')
+            ->where('canManageTemplates', true)
+            ->where('canCreateTemplateVersions', false));
 });
 
 function templateManagementWorkbook(Organization $organization): FileAsset

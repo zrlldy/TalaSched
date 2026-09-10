@@ -297,10 +297,14 @@ test('class composer choices are public period scoped and limited to active elig
     OfferingComponent::factory()->create();
     $otherPeriod = AcademicPeriod::factory()->forAcademicYear($this->period->academicYear)->create(['sequence' => 2]);
     OfferingComponent::factory()->forOffering(SubjectOffering::factory()->forAcademicPeriod($otherPeriod)->create())->create();
+    SubjectOffering::factory()->forAcademicPeriod($this->period)->create(['status' => SubjectOfferingStatus::Active]);
+    SubjectOffering::factory()->forAcademicPeriod($this->period)->create(['status' => SubjectOfferingStatus::Draft]);
+    SubjectOffering::factory()->forAcademicPeriod($otherPeriod)->create(['status' => SubjectOfferingStatus::Active]);
 
     $this->actingAs($this->user)->get(route('scheduling.timetables.show', [$this->organization, $this->timetable]))
         ->assertOk()->assertInertia(fn (Assert $page) => $page
         ->has('offeringComponents', 1)
+        ->where('emptyOfferingCount', 1)
         ->where('offeringComponents.0.id', $component->public_id)
         ->where('offeringComponents.0.group.id', $this->group->resource->public_id)
         ->has('offeringComponents.0.instructors', 1)

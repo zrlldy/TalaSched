@@ -302,8 +302,8 @@ class ApprovalController extends Controller
                 'position' => (string) $profile->position,
                 'academic_unit_id' => $profile->academic_unit_id === null ? null : (string) $profile->academic_unit_id,
                 'academic_unit_name' => $profile->academic_unit_name === null ? null : (string) $profile->academic_unit_name,
-                'valid_from' => $profile->valid_from === null ? null : (string) $profile->valid_from,
-                'valid_until' => $profile->valid_until === null ? null : (string) $profile->valid_until,
+                'valid_from' => $this->dateInput($profile->valid_from)?->toDateString(),
+                'valid_until' => $this->dateInput($profile->valid_until)?->toDateString(),
                 'has_signature' => $profile->signature_path !== null,
                 'signature_download_url' => $profile->signature_path === null
                     ? null

@@ -114,7 +114,7 @@ class ExcelTemplateController extends Controller
                 'key' => $placeholder->value,
                 'label' => $placeholder->label(),
             ], TemplatePlaceholder::cases()),
-            'canManageTemplates' => $actor->can('create', [ExcelTemplateVersion::class, $currentOrganization]),
+            'canCreateTemplateVersions' => $actor->can('create', [ExcelTemplateVersion::class, $currentOrganization]),
             'schedulingGranularity' => $currentOrganization->scheduling_granularity,
         ]);
     }

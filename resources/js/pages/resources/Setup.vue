@@ -9,11 +9,12 @@ import {
     Layers3,
     Plus,
     School,
-    Users,
 } from '@lucide/vue';
 import { computed, ref } from 'vue';
+import AddTeacherModal from '@/components/AddTeacherModal.vue';
 import InputError from '@/components/InputError.vue';
 import MinuteTimeInput from '@/components/MinuteTimeInput.vue';
+import RecordDirectory from '@/components/RecordDirectory.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -29,12 +30,12 @@ import {
     store as storeOffering,
     instructors as assignInstructor,
     status as updateOfferingStatus,
+    components as addOfferingComponent,
 } from '@/routes/catalog/offerings';
 import { store as storeSubject } from '@/routes/catalog/subjects';
 import { setup } from '@/routes/resources';
 import { store as storeAvailability } from '@/routes/resources/availability';
 import { store as storeBuilding } from '@/routes/resources/buildings';
-import { store as storeFaculty } from '@/routes/resources/faculty';
 import { store as storeFeature } from '@/routes/resources/features';
 import { store as storeRoomType } from '@/routes/resources/room-types';
 import { store as storeRoom } from '@/routes/resources/rooms';
@@ -85,12 +86,18 @@ type Subject = {
 type Offering = {
     id: string;
     code: string | null;
+    subject_id: string;
     subject_code: string;
     period_name: string;
     group_label: string;
     expected_enrollment: number;
     status: string;
     components_count: number;
+    available_components: {
+        kind: string;
+        name: string;
+        duration_minutes: number;
+    }[];
     components: {
         id: string;
         name: string;
@@ -117,6 +124,17 @@ type Props = {
     groups: { id: string; label: string; year_name: string }[];
     units: { id: string; label: string; type: string }[];
     resources: { id: string; name: string; type: string; type_label: string }[];
+    availabilityRules: {
+        resource_name: string;
+        kind: string;
+        weekday: number;
+        starts_at_minute: number;
+        ends_at_minute: number;
+        period_name: string | null;
+        effective_from: string | null;
+        effective_until: string | null;
+        priority: number;
+    }[];
     employmentTypes: Option[];
     deliveryModes: Option[];
     componentKinds: Option[];
@@ -147,7 +165,7 @@ const weekdays = [
 
 const formatMinutes = (minutes: number | null) => {
     if (minutes === null) {
-        return 'Not set';
+        return 'No limit';
     }
 
     return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
@@ -160,6 +178,14 @@ const { section, selectSection } = useWorkspaceSection(
 );
 const search = ref('');
 const roomName = ref('');
+const componentSubjectId = ref('');
+const subjectRequirementsOpen = ref(false);
+function prepareSubjectRequirements(subjectId: string): void {
+    componentSubjectId.value = subjectId;
+    subjectRequirementsOpen.value = true;
+    search.value = '';
+    selectSection('subjects');
+}
 const sections = computed(() => [
     { value: 'faculty', label: 'Faculty', count: props.faculty.length },
     { value: 'rooms', label: 'Rooms', count: props.rooms.length },
@@ -202,6 +228,20 @@ const filteredOfferings = computed(() =>
         ),
     ),
 );
+const filteredAvailability = computed(() =>
+    props.availabilityRules
+        .map((rule, index) => ({ ...rule, id: String(index) }))
+        .filter((rule) =>
+            matches(rule.resource_name, rule.kind, rule.period_name),
+        ),
+);
+const clockTime = (minutes: number): string =>
+    `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+
+function facultyCreated(): void {
+    search.value = '';
+    selectSection('faculty');
+}
 
 defineOptions({
     layout: (layoutProps: { currentOrganization?: Organization | null }) => ({
@@ -239,7 +279,7 @@ defineOptions({
             label="Resource sections"
             @select="selectSection"
         />
-        <div v-show="section !== 'availability'" class="max-w-sm">
+        <div class="max-w-sm">
             <Label for="resource-search" class="sr-only"
                 >Search this directory</Label
             >
@@ -257,201 +297,75 @@ defineOptions({
             aria-label="Faculty"
         >
             <article class="min-w-0 rounded-lg border border-border/70 bg-card">
-                <div class="border-b border-border/70 px-5 py-4">
-                    <h2 class="font-semibold">Faculty directory</h2>
-                    <p class="mt-1 text-sm leading-5 text-muted-foreground">
-                        Primary units and load limits are visible before
-                        scheduling.
-                    </p>
-                </div>
-                <div class="divide-y divide-border">
-                    <div
-                        v-for="person in filteredFaculty"
-                        :key="person.id"
-                        class="flex min-w-0 items-start justify-between gap-4 px-5 py-4"
-                    >
-                        <div class="min-w-0">
-                            <p class="font-medium break-words">
-                                {{ person.name }}
-                            </p>
-                            <p
-                                class="mt-1 text-xs break-words text-muted-foreground"
-                            >
-                                {{
-                                    person.employee_number ||
-                                    'No employee number'
-                                }}
-                                <span v-if="person.position"
-                                    >/ {{ person.position }}</span
-                                >
-                            </p>
-                            <p
-                                class="mt-1 text-xs break-words text-muted-foreground"
-                            >
-                                {{
-                                    person.units
-                                        .map((unit) => unit.name)
-                                        .join(', ') || 'Unassigned'
-                                }}
-                            </p>
-                        </div>
-                        <span
-                            class="font-mono text-xs leading-5 text-muted-foreground"
-                            >{{
-                                formatMinutes(person.maximum_weekly_minutes)
-                            }}/wk</span
-                        >
-                    </div>
-                    <p
-                        v-if="filteredFaculty.length === 0"
-                        class="px-5 py-6 text-sm leading-5 text-muted-foreground"
-                    >
-                        No faculty match this search. Add a faculty member or
-                        try another name.
-                    </p>
-                </div>
-            </article>
-            <details
-                v-if="canManageResources"
-                :open="faculty.length === 0"
-                class="group rounded-lg border border-border bg-card p-5"
-            >
-                <summary
-                    class="cursor-pointer text-sm font-semibold focus-visible:ring-2 focus-visible:ring-ring"
+                <div
+                    class="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 px-5 py-4"
                 >
-                    Add a faculty member
-                </summary>
-                <div class="pt-5">
-                    <div class="mb-5 flex items-start gap-3">
-                        <div
-                            class="rounded-lg bg-lime-500/15 p-2 text-lime-700 dark:text-lime-300"
-                        >
-                            <Users class="h-4 w-4" />
-                        </div>
-                        <div>
-                            <h2 class="font-semibold">Add faculty</h2>
-                            <p
-                                class="mt-1 text-sm leading-5 text-muted-foreground"
-                            >
-                                Add a faculty member and their teaching load
-                                limits.
-                            </p>
-                        </div>
+                    <div>
+                        <h2 class="font-semibold">Faculty directory</h2>
+                        <p class="mt-1 text-sm leading-5 text-muted-foreground">
+                            Primary units and load limits are visible before
+                            scheduling.
+                        </p>
                     </div>
-                    <Form
-                        @success="selectSection(section)"
-                        v-bind="storeFaculty.form([organizationSlug])"
-                        #default="{ errors, processing }"
-                    >
-                        <ValidationSummary :errors="errors" class="mb-4" />
-                        <div class="grid gap-4 sm:grid-cols-2">
-                            <div class="sm:col-span-2">
-                                <Label for="faculty-resource-name"
-                                    >Faculty name</Label
-                                ><Input
-                                    id="faculty-resource-name"
-                                    name="resource_name"
-                                    :class="fieldClass"
-                                    placeholder="Dr. Ada Lovelace"
-                                /><InputError :message="errors.resource_name" />
-                            </div>
-                            <div>
-                                <Label for="employee-number"
-                                    >Employee number</Label
-                                ><Input
-                                    id="employee-number"
-                                    name="employee_number"
-                                    :class="fieldClass"
-                                    placeholder="FAC-001"
-                                /><InputError
-                                    :message="errors.employee_number"
-                                />
-                            </div>
-                            <div>
-                                <Label for="faculty-position">Position</Label
-                                ><Input
-                                    id="faculty-position"
-                                    name="position"
-                                    :class="fieldClass"
-                                    placeholder="Associate professor"
-                                /><InputError :message="errors.position" />
-                            </div>
-                            <div>
-                                <Label for="employment-type"
-                                    >Employment type</Label
-                                ><select
-                                    id="employment-type"
-                                    name="employment_type"
-                                    :class="selectClass"
-                                >
-                                    <option value="">Select type</option>
-                                    <option
-                                        v-for="option in employmentTypes"
-                                        :key="option.value"
-                                        :value="option.value"
-                                    >
-                                        {{ option.label }}
-                                    </option></select
-                                ><InputError
-                                    :message="errors.employment_type"
-                                />
-                            </div>
-                            <div>
-                                <Label for="faculty-unit"
-                                    >Primary academic unit</Label
-                                ><select
-                                    id="faculty-unit"
-                                    name="academic_unit_id"
-                                    :class="selectClass"
-                                >
-                                    <option value="">Unassigned</option>
-                                    <option
-                                        v-for="unit in units"
-                                        :key="unit.id"
-                                        :value="unit.id"
-                                    >
-                                        {{ unit.label }}
-                                    </option></select
-                                ><InputError
-                                    :message="errors.academic_unit_id"
-                                />
-                            </div>
-                            <div>
-                                <Label for="daily-limit"
-                                    >Daily limit (minutes)</Label
-                                ><Input
-                                    id="daily-limit"
-                                    name="maximum_daily_minutes"
-                                    type="number"
-                                    :class="fieldClass"
-                                    placeholder="480"
-                                /><InputError
-                                    :message="errors.maximum_daily_minutes"
-                                />
-                            </div>
-                            <div>
-                                <Label for="weekly-limit"
-                                    >Weekly limit (minutes)</Label
-                                ><Input
-                                    id="weekly-limit"
-                                    name="maximum_weekly_minutes"
-                                    type="number"
-                                    :class="fieldClass"
-                                    placeholder="2400"
-                                /><InputError
-                                    :message="errors.maximum_weekly_minutes"
-                                />
-                            </div>
-                        </div>
-                        <Button
-                            class="mt-5"
-                            type="submit"
-                            :disabled="processing"
-                            ><Plus class="h-4 w-4" /> Add faculty</Button
-                        >
-                    </Form>
+                    <AddTeacherModal
+                        v-if="canManageResources"
+                        :organization-slug="organizationSlug"
+                        :employment-types="employmentTypes"
+                        :units="units"
+                        @created="facultyCreated"
+                    />
                 </div>
-            </details>
+                <RecordDirectory
+                    :records="filteredFaculty"
+                    :columns="[
+                        { key: 'teacher', label: 'Teacher' },
+                        { key: 'unit', label: 'Academic unit' },
+                        { key: 'daily', label: 'Daily limit' },
+                        { key: 'weekly', label: 'Weekly limit' },
+                    ]"
+                    label="Faculty directory"
+                    row-test="faculty-row"
+                    :empty="
+                        faculty.length
+                            ? 'No teachers match your search. Try another name or employee number.'
+                            : 'No teachers yet. Add your first teacher to start building the teaching team.'
+                    "
+                >
+                    <template #teacher="{ record }"
+                        ><p class="font-medium">{{ record.name }}</p>
+                        <p class="mt-1 text-xs text-muted-foreground">
+                            {{ record.employee_number || 'No employee number'
+                            }}<span v-if="record.position">
+                                / {{ record.position }}</span
+                            >
+                        </p></template
+                    >
+                    <template #unit="{ record }"
+                        ><span class="text-muted-foreground">{{
+                            record.units.map((unit) => unit.name).join(', ') ||
+                            'Unassigned'
+                        }}</span></template
+                    >
+                    <template #daily="{ record }"
+                        ><span
+                            class="font-mono"
+                            data-test="daily-teaching-limit"
+                            >{{
+                                formatMinutes(record.maximum_daily_minutes)
+                            }}</span
+                        ></template
+                    >
+                    <template #weekly="{ record }"
+                        ><span
+                            class="font-mono"
+                            data-test="weekly-teaching-limit"
+                            >{{
+                                formatMinutes(record.maximum_weekly_minutes)
+                            }}</span
+                        ></template
+                    >
+                </RecordDirectory>
+            </article>
         </section>
         <section
             v-show="section === 'rooms'"
@@ -465,36 +379,42 @@ defineOptions({
                         Find a teaching space by name, code, or building.
                     </p>
                 </div>
-                <div class="divide-y divide-border">
-                    <div
-                        v-for="room in filteredRooms"
-                        :key="room.id"
-                        class="flex min-w-0 items-start justify-between gap-4 px-5 py-4"
+                <RecordDirectory
+                    :records="filteredRooms"
+                    :columns="[
+                        { key: 'room', label: 'Room' },
+                        { key: 'building', label: 'Building / type' },
+                        { key: 'capacity', label: 'Seats' },
+                        { key: 'delivery', label: 'Delivery' },
+                    ]"
+                    label="Room directory"
+                    :empty="
+                        rooms.length
+                            ? 'No rooms match your search. Try another name, code, or building.'
+                            : 'No rooms yet. Add a room type, then your first teaching space.'
+                    "
+                >
+                    <template #room="{ record }"
+                        ><p class="font-medium">{{ record.name }}</p>
+                        <p class="mt-1 font-mono text-xs text-muted-foreground">
+                            {{ record.code }}
+                        </p></template
                     >
-                        <div class="min-w-0">
-                            <p class="font-medium break-words">
-                                {{ room.code }} / {{ room.name }}
-                            </p>
-                            <p
-                                class="mt-1 text-xs break-words text-muted-foreground"
-                            >
-                                {{ room.building_code || 'No building' }} /
-                                {{ room.room_type_code }}
-                            </p>
-                        </div>
-                        <span
-                            class="shrink-0 font-mono text-xs leading-5 text-muted-foreground"
-                            >{{ room.capacity || '—' }} seats</span
-                        >
-                    </div>
-                    <p
-                        v-if="filteredRooms.length === 0"
-                        class="px-5 py-6 text-sm leading-5 text-muted-foreground"
+                    <template #building="{ record }"
+                        >{{ record.building_code || 'No building' }} /
+                        {{ record.room_type_code }}</template
                     >
-                        No rooms match this search. Add a room or try another
-                        name.
-                    </p>
-                </div>
+                    <template #capacity="{ record }"
+                        ><span class="font-mono">{{
+                            record.capacity ?? 'Not set'
+                        }}</span></template
+                    >
+                    <template #delivery="{ record }"
+                        ><Badge variant="outline">{{
+                            record.delivery_mode
+                        }}</Badge></template
+                    >
+                </RecordDirectory>
             </article>
             <p
                 v-if="roomTypes.length === 0 && canManageResources"
@@ -782,50 +702,51 @@ defineOptions({
                         Components currently attached to each subject.
                     </p>
                 </div>
-                <div class="divide-y divide-border">
-                    <div
-                        v-for="subject in filteredSubjects"
-                        :key="subject.id"
-                        class="min-w-0 px-5 py-4"
+                <RecordDirectory
+                    :records="filteredSubjects"
+                    :columns="[
+                        { key: 'subject', label: 'Subject' },
+                        { key: 'units', label: 'Units' },
+                        { key: 'requirements', label: 'Teaching requirements' },
+                    ]"
+                    label="Subject catalog"
+                    :empty="
+                        subjects.length
+                            ? 'No subjects match your search. Try another name or code.'
+                            : 'No subjects yet. Add a subject, then its lecture or lab requirements.'
+                    "
+                >
+                    <template #subject="{ record }"
+                        ><p class="font-medium">{{ record.name }}</p>
+                        <p class="mt-1 font-mono text-xs text-muted-foreground">
+                            {{ record.code }}
+                        </p></template
                     >
-                        <div class="flex items-start justify-between gap-4">
-                            <div class="min-w-0">
-                                <p class="font-medium break-words">
-                                    {{ subject.code }} / {{ subject.name }}
-                                </p>
-                                <p
-                                    class="mt-1 text-xs leading-5 text-muted-foreground"
-                                >
-                                    {{ subject.units || '—' }} units /
-                                    {{ subject.components.length }}
-                                    component(s)
-                                </p>
-                            </div>
-                            <Badge class="shrink-0" variant="outline"
-                                >Catalog</Badge
-                            >
-                        </div>
-                        <div
-                            v-if="subject.components.length"
-                            class="mt-3 flex flex-wrap gap-2"
+                    <template #units="{ record }"
+                        ><span class="font-mono">{{
+                            record.units ?? 'Not set'
+                        }}</span></template
+                    >
+                    <template #requirements="{ record }"
+                        ><div
+                            v-if="record.components.length"
+                            class="flex flex-wrap gap-2"
                         >
                             <span
-                                v-for="component in subject.components"
+                                v-for="component in record.components"
                                 :key="component.kind + component.name"
-                                class="rounded-md bg-muted px-2 py-1 font-mono text-[11px]"
-                                >{{ component.kind }} ·
-                                {{ component.weekly_minutes }}m</span
+                                class="rounded-md bg-muted px-2 py-1 text-xs"
+                                >{{ component.name }} /
+                                {{ component.weekly_minutes }} min per
+                                week</span
                             >
                         </div>
-                    </div>
-                    <p
-                        v-if="filteredSubjects.length === 0"
-                        class="px-5 py-6 text-sm leading-5 text-muted-foreground"
+                        <span v-else class="text-warning"
+                            >Add lecture or lab requirements before
+                            scheduling</span
+                        ></template
                     >
-                        No subjects match this search. Add a subject or try
-                        another name.
-                    </p>
-                </div>
+                </RecordDirectory>
             </article>
             <details
                 v-if="canManageCatalog"
@@ -911,7 +832,7 @@ defineOptions({
             </details>
             <details
                 v-if="canManageCatalog && subjects.length > 0"
-                :open="false"
+                :open="subjectRequirementsOpen"
                 class="group rounded-lg border border-border bg-card p-5"
             >
                 <summary
@@ -947,6 +868,7 @@ defineOptions({
                                 <Label for="component-subject">Subject</Label
                                 ><select
                                     id="component-subject"
+                                    v-model="componentSubjectId"
                                     name="subject_id"
                                     :class="selectClass"
                                 >
@@ -1107,17 +1029,17 @@ defineOptions({
         >
             <article class="min-w-0 rounded-lg border border-border/70 bg-card">
                 <div class="border-b border-border/70 px-5 py-4">
-                    <h2 class="font-semibold">Recent offerings</h2>
+                    <h2 class="font-semibold">Offering directory</h2>
                     <p class="mt-1 text-sm leading-5 text-muted-foreground">
                         See which subjects and student groups are prepared for
                         each period.
                     </p>
                 </div>
-                <div class="divide-y divide-border">
+                <div class="grid items-start gap-3 p-3 xl:grid-cols-2">
                     <div
                         v-for="offering in filteredOfferings"
                         :key="offering.id"
-                        class="min-w-0 p-4"
+                        class="min-w-0 rounded-lg border border-border/70 bg-background p-4"
                     >
                         <div class="flex items-start justify-between gap-3">
                             <p class="min-w-0 font-medium break-words">
@@ -1139,6 +1061,7 @@ defineOptions({
                             {{ offering.expected_enrollment }} seats
                         </p>
                         <details
+                            :open="offering.components.length === 0"
                             class="mt-3 rounded-md border border-border bg-background p-3"
                         >
                             <summary class="cursor-pointer text-sm font-medium">
@@ -1302,9 +1225,86 @@ defineOptions({
                                     class="text-sm text-warning"
                                 >
                                     This offering has no teaching components.
-                                    Add teaching requirements to the subject
-                                    before creating an offering.
+                                    Add a lecture or lab below, then assign an
+                                    instructor.
                                 </p>
+                                <Form
+                                    v-if="
+                                        canManageCatalog &&
+                                        offering.available_components.length
+                                    "
+                                    v-bind="
+                                        addOfferingComponent.form(
+                                            organizationSlug,
+                                        )
+                                    "
+                                    :error-bag="`offering-component-${offering.id}`"
+                                    #default="{ errors, processing }"
+                                    class="grid gap-3 border-t pt-3"
+                                >
+                                    <input
+                                        type="hidden"
+                                        name="offering_id"
+                                        :value="offering.id"
+                                    />
+                                    <p class="text-sm text-muted-foreground">
+                                        Include these subject requirements in
+                                        this offering:
+                                    </p>
+                                    <ul class="space-y-1 text-sm">
+                                        <li
+                                            v-for="component in offering.available_components"
+                                            :key="
+                                                component.kind + component.name
+                                            "
+                                        >
+                                            {{ component.name }} /
+                                            {{ component.duration_minutes }}
+                                            minutes per session
+                                        </li>
+                                    </ul>
+                                    <ValidationSummary :errors="errors" />
+                                    <Button
+                                        type="submit"
+                                        variant="outline"
+                                        class="justify-self-start"
+                                        :disabled="processing"
+                                        >{{
+                                            processing
+                                                ? 'Adding...'
+                                                : 'Add subject requirements'
+                                        }}</Button
+                                    >
+                                </Form>
+                                <div
+                                    v-else-if="offering.components.length === 0"
+                                    class="space-y-2"
+                                >
+                                    <p class="text-sm text-muted-foreground">
+                                        This subject needs lecture or lab
+                                        requirements first. After adding them,
+                                        return here to include them in this
+                                        offering.
+                                    </p>
+                                    <Button
+                                        v-if="canManageCatalog"
+                                        type="button"
+                                        variant="outline"
+                                        @click="
+                                            prepareSubjectRequirements(
+                                                offering.subject_id,
+                                            )
+                                        "
+                                        >Set up subject requirements</Button
+                                    >
+                                    <p
+                                        v-else
+                                        class="text-sm text-muted-foreground"
+                                    >
+                                        Ask your catalog administrator to add
+                                        the requirements.
+                                    </p>
+                                </div>
                             </div>
                         </details>
                     </div>
@@ -1490,8 +1490,76 @@ defineOptions({
             aria-label="Availability"
         >
             <p class="text-sm text-muted-foreground">
-                Times use {{ page.props.organizationTimezone }}.
+                Times use
+                {{
+                    page.props.organizationTimezone ||
+                    "your organization's local timezone"
+                }}.
             </p>
+            <article class="min-w-0 rounded-lg border border-border/70 bg-card">
+                <div class="border-b border-border/70 px-5 py-4">
+                    <h2 class="font-semibold">Saved availability rules</h2>
+                    <p class="mt-1 text-sm text-muted-foreground">
+                        Review the hours and period overrides used when checking
+                        your timetable.
+                    </p>
+                </div>
+                <RecordDirectory
+                    :records="filteredAvailability"
+                    :columns="[
+                        { key: 'resource', label: 'Resource' },
+                        { key: 'hours', label: 'Weekly hours' },
+                        { key: 'kind', label: 'Rule' },
+                        { key: 'period', label: 'Applies to' },
+                    ]"
+                    label="Saved availability rules"
+                    row-test="availability-row"
+                    :empty="
+                        availabilityRules.length
+                            ? 'No availability rules match your search.'
+                            : 'No availability rules yet. Add available or unavailable hours below.'
+                    "
+                >
+                    <template #resource="{ record }"
+                        ><span class="font-medium">{{
+                            record.resource_name
+                        }}</span></template
+                    >
+                    <template #hours="{ record }"
+                        ><p>
+                            {{
+                                weekdays.find(
+                                    (day) => day.value === record.weekday,
+                                )?.label
+                            }}
+                        </p>
+                        <p class="mt-1 font-mono text-xs">
+                            {{ clockTime(record.starts_at_minute) }} -
+                            {{ clockTime(record.ends_at_minute) }}
+                        </p></template
+                    >
+                    <template #kind="{ record }"
+                        ><Badge variant="outline">{{ record.kind }}</Badge>
+                        <p class="mt-1 text-xs text-muted-foreground">
+                            Priority {{ record.priority }}
+                        </p></template
+                    >
+                    <template #period="{ record }"
+                        ><p>
+                            {{ record.period_name || 'All academic periods' }}
+                        </p>
+                        <p
+                            v-if="
+                                record.effective_from || record.effective_until
+                            "
+                            class="mt-1 text-xs text-muted-foreground"
+                        >
+                            {{ record.effective_from || 'Any start date' }} /
+                            {{ record.effective_until || 'No end date' }}
+                        </p></template
+                    >
+                </RecordDirectory>
+            </article>
             <template v-if="canManageResources"
                 ><article
                     class="min-w-0 rounded-lg border border-border/70 bg-card p-5"

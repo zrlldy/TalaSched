@@ -11,6 +11,7 @@ use App\Enums\FacultyEmploymentType;
 use App\Enums\ResourceType;
 use App\Enums\SubjectComponentKind;
 use App\Enums\SubjectOfferingStatus;
+use App\Http\Requests\Catalog\AddOfferingComponentRequest;
 use App\Http\Requests\Catalog\AssignOfferingInstructorRequest;
 use App\Http\Requests\Catalog\StoreSubjectComponentRequest;
 use App\Http\Requests\Catalog\StoreSubjectOfferingRequest;
@@ -29,6 +30,7 @@ use App\Models\FacultyProfile;
 use App\Models\Feature;
 use App\Models\OfferingComponent;
 use App\Models\Organization;
+use App\Models\ResourceAvailabilityRule;
 use App\Models\Room;
 use App\Models\RoomType;
 use App\Models\SchedulingResource;
@@ -204,19 +206,27 @@ class ResourceSetupController extends Controller
 
         $offerings = SubjectOffering::query()
             ->where('organization_id', $organizationId)
-            ->with(['subject', 'academicPeriod', 'studentGroup', 'components.instructors.resource'])
+            ->with(['subject.components', 'academicPeriod', 'studentGroup', 'components.instructors.resource'])
             ->orderByDesc('id')
             ->limit(100)
             ->get()
             ->map(fn (SubjectOffering $offering): array => [
                 'id' => $offering->public_id,
                 'code' => $offering->code,
+                'subject_id' => $offering->subject->public_id,
                 'subject_code' => $offering->subject->code,
                 'period_name' => $offering->academicPeriod->name,
                 'group_label' => $offering->studentGroup->code.' / '.$offering->studentGroup->name,
                 'expected_enrollment' => $offering->expected_enrollment,
                 'status' => $offering->status->value,
                 'components_count' => $offering->components->count(),
+                'available_components' => $offering->subject->components
+                    ->whereNotIn('id', $offering->components->pluck('subject_component_id'))
+                    ->map(fn (SubjectComponent $component): array => [
+                        'kind' => $component->kind->value,
+                        'name' => $component->name,
+                        'duration_minutes' => $component->default_duration_minutes,
+                    ])->values()->all(),
                 'components' => $offering->components->map(fn (OfferingComponent $component): array => [
                     'id' => $component->public_id,
                     'name' => $component->name,
@@ -239,6 +249,25 @@ class ResourceSetupController extends Controller
             'groups' => $groups,
             'units' => $units,
             'resources' => $resources,
+            'availabilityRules' => ResourceAvailabilityRule::query()
+                ->where('organization_id', $organizationId)
+                ->whereHas('resource')
+                ->with(['resource', 'academicPeriod'])
+                ->orderBy('scheduling_resource_id')
+                ->orderBy('weekday')
+                ->orderBy('starts_at_minute')
+                ->get()
+                ->map(fn (ResourceAvailabilityRule $rule): array => [
+                    'resource_name' => $rule->resource->name,
+                    'kind' => $rule->kind->value,
+                    'weekday' => $rule->weekday,
+                    'starts_at_minute' => $rule->starts_at_minute,
+                    'ends_at_minute' => $rule->ends_at_minute,
+                    'period_name' => $rule->academicPeriod?->name,
+                    'effective_from' => $rule->effective_from?->toDateString(),
+                    'effective_until' => $rule->effective_until?->toDateString(),
+                    'priority' => $rule->priority,
+                ])->all(),
             'resourceTypes' => array_map(fn (ResourceType $type): array => [
                 'value' => $type->value,
                 'label' => Str::headline($type->value),
@@ -280,6 +309,12 @@ class ResourceSetupController extends Controller
 
         if (isset($attributes['employment_type'])) {
             $attributes['employment_type'] = FacultyEmploymentType::from($attributes['employment_type']);
+        }
+
+        foreach (['maximum_daily_minutes', 'maximum_weekly_minutes'] as $limit) {
+            if (isset($attributes[$limit])) {
+                $attributes[$limit] = (int) $attributes[$limit];
+            }
         }
 
         $profile = $service->create($currentOrganization, $attributes['resource_name'], array_diff_key($attributes, ['resource_name' => true]), $request->user());
@@ -434,6 +469,19 @@ class ResourceSetupController extends Controller
         $service->updateStatus($currentOrganization, $offering, SubjectOfferingStatus::from($request->validated('status')), $request->user());
 
         Inertia::flash('toast', ['type' => 'success', 'message' => 'Offering status updated.']);
+
+        return to_route('resources.setup', [$currentOrganization, 'section' => 'offerings']);
+    }
+
+    public function addOfferingComponent(AddOfferingComponentRequest $request, Organization $currentOrganization, SubjectOfferingService $service): RedirectResponse
+    {
+        $offering = SubjectOffering::query()
+            ->where('organization_id', $currentOrganization->getKey())
+            ->where('public_id', $request->validated('offering_id'))
+            ->firstOrFail();
+        $service->addMissingComponentSnapshots($currentOrganization, $offering, $request->user());
+
+        Inertia::flash('toast', ['type' => 'success', 'message' => 'Teaching components added. Assign an instructor to schedule each class.']);
 
         return to_route('resources.setup', [$currentOrganization, 'section' => 'offerings']);
     }

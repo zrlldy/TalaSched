@@ -24,6 +24,7 @@ const props = defineProps<{
     versionId: string;
     timezone: string;
     offerings: ScheduleOfferingOption[];
+    emptyOfferingCount: number;
     rooms: { id: string; name: string }[];
 }>();
 const emit = defineEmits<{ created: [id: string] }>();
@@ -140,10 +141,19 @@ const submit = async (): Promise<void> => {
                 >
             </DialogHeader>
             <div v-if="offerings.length === 0" class="space-y-3 py-3">
-                <p class="text-sm text-muted-foreground">
-                    This period has no active subject offerings. Set up a
-                    subject offering and its student group before adding
-                    classes.
+                <p class="font-medium">No schedulable classes yet</p>
+                <p
+                    v-if="emptyOfferingCount"
+                    class="text-sm text-muted-foreground"
+                >
+                    {{ emptyOfferingCount }} active offering(s) in this period
+                    have no teaching components. Add a lecture or lab to each
+                    offering, then assign an instructor.
+                </p>
+                <p v-else class="text-sm text-muted-foreground">
+                    Prepare an active subject offering for this timetable's
+                    period, with an active student group, a lecture or lab
+                    component, and an assigned instructor.
                 </p>
                 <Button variant="outline" as-child
                     ><Link
@@ -157,6 +167,22 @@ const submit = async (): Promise<void> => {
                 >
             </div>
             <form v-else class="grid gap-4" @submit.prevent="submit">
+                <p
+                    v-if="emptyOfferingCount"
+                    class="rounded-md border border-warning/30 bg-warning/5 p-3 text-sm"
+                >
+                    {{ emptyOfferingCount }} offering(s) are missing from this
+                    list because they have no lecture or lab components.
+                    <Link
+                        class="underline underline-offset-4"
+                        :href="
+                            setup(organizationSlug, {
+                                query: { section: 'offerings' },
+                            })
+                        "
+                        >Complete offering setup</Link
+                    >
+                </p>
                 <fieldset
                     :disabled="saving"
                     class="grid gap-4 disabled:opacity-60"
@@ -299,6 +325,27 @@ const submit = async (): Promise<void> => {
                         <p class="text-xs text-muted-foreground">
                             Delivery: {{ form.delivery_mode }}. Room capacity
                             and requirements are checked before saving.
+                        </p>
+                        <p
+                            v-if="
+                                rooms.length === 0 &&
+                                ['physical', 'hybrid'].includes(
+                                    form.delivery_mode,
+                                )
+                            "
+                            class="text-sm text-warning"
+                        >
+                            This class needs a room.
+                            <Link
+                                class="underline underline-offset-4"
+                                :href="
+                                    setup(organizationSlug, {
+                                        query: { section: 'rooms' },
+                                    })
+                                "
+                                >Add a teaching space</Link
+                            >
+                            before saving.
                         </p>
                     </div>
                     <div class="grid gap-1.5">

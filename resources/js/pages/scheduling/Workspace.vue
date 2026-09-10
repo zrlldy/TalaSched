@@ -78,6 +78,7 @@ type Props = {
     canManageVersions: boolean;
     canSubmitVersions: boolean;
     offeringComponents: ScheduleOfferingOption[];
+    emptyOfferingCount: number;
 };
 type ViewResponse = {
     data: { type: string; attributes: TimetableView };
@@ -634,6 +635,7 @@ defineOptions({
                     :version-id="currentView.context.version.id"
                     :timezone="currentView.context.organization.timezone"
                     :offerings="offeringComponents"
+                    :empty-offering-count="emptyOfferingCount"
                     :rooms="
                         resources.filter((resource) => resource.type === 'room')
                     "
@@ -666,6 +668,39 @@ defineOptions({
                 </Button>
             </div>
         </header>
+
+        <div
+            v-if="!canEditVersion"
+            class="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/30 px-4 py-3 text-sm"
+            role="status"
+        >
+            <p v-if="!canManageScheduling">
+                This timetable is read only for your current access. Ask your
+                administrator for scheduling access and an enabled manual
+                scheduling plan.
+            </p>
+            <template v-else-if="currentView.date">
+                <p>
+                    Date view is read only. Return to the weekly timetable to
+                    add or edit classes in a draft.
+                </p>
+                <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    @click="
+                        selectedDate = '';
+                        refreshView();
+                    "
+                    >Show weekly timetable</Button
+                >
+            </template>
+            <p v-else>
+                This version is
+                {{ currentView.context.version.status.replaceAll('_', ' ') }}.
+                Select or create a draft in Versions to add classes.
+            </p>
+        </div>
 
         <div
             class="flex flex-wrap items-center justify-between gap-2 border-b border-border py-2 font-schedule text-[0.6875rem]"

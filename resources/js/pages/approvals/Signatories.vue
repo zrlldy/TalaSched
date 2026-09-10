@@ -4,14 +4,18 @@ import {
     BadgeCheck,
     CalendarDays,
     ImagePlus,
-    Pencil,
+    ChevronDown,
+    Plus,
+    Search,
     UserRound,
 } from '@lucide/vue';
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
+import ApprovalNavigation from '@/components/ApprovalNavigation.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import ValidationSummary from '@/components/ValidationSummary.vue';
 import WorkspacePageHeader from '@/components/WorkspacePageHeader.vue';
 import WorkspaceState from '@/components/WorkspaceState.vue';
 import { inbox, signatories } from '@/routes/approvals';
@@ -43,6 +47,24 @@ const page = usePage();
 const organization = computed(
     () => page.props.currentOrganization as Organization | null,
 );
+const section = ref<'directory' | 'create'>('directory');
+const search = ref('');
+const visibleProfiles = computed(() => {
+    const query = search.value.trim().toLowerCase();
+
+    return props.profiles.filter((profile) =>
+        [
+            profile.name,
+            profile.position,
+            profile.user_name,
+            profile.academic_unit_name ?? '',
+        ].some((value) => value.toLowerCase().includes(query)),
+    );
+});
+const saved = (): void => {
+    section.value = 'directory';
+    search.value = '';
+};
 const formatDate = (value: string | null): string =>
     value === null
         ? 'Open-ended'
@@ -72,24 +94,51 @@ defineOptions({
 </script>
 
 <template>
-    <Head title="Signatory profiles" />
-    <div class="space-y-8">
+    <div class="mx-auto w-full max-w-7xl min-w-0 space-y-5 p-4 sm:p-6">
+        <Head title="Signatory profiles" />
         <WorkspacePageHeader
-            section="Approvals"
+            section="Review & publish"
             title="Signatory profiles"
-            description="Maintain the names, roles, validity windows, and private signature assets used for future approval snapshots."
+            description="Manage the names and signatures that appear on approved timetables."
         >
-            <template #metadata
-                ><span
-                    >{{ props.profiles.length }} active profile{{
-                        props.profiles.length === 1 ? '' : 's'
-                    }}</span
-                ><span>Images remain private</span></template
+            <template #actions
+                ><Button @click="section = 'create'"
+                    ><Plus /> Add profile</Button
+                ></template
             >
         </WorkspacePageHeader>
+        <ApprovalNavigation
+            :organization-slug="organization?.slug ?? ''"
+            current="signatories"
+            :can-manage="true"
+        />
+        <div
+            class="flex flex-wrap gap-2"
+            role="group"
+            aria-label="Signatory sections"
+        >
+            <Button
+                :variant="section === 'directory' ? 'secondary' : 'ghost'"
+                :aria-pressed="section === 'directory'"
+                @click="section = 'directory'"
+                ><UserRound /> Saved profiles
+                <span class="font-schedule text-xs">{{
+                    profiles.length
+                }}</span></Button
+            >
+            <Button
+                :variant="section === 'create' ? 'secondary' : 'ghost'"
+                :aria-pressed="section === 'create'"
+                @click="section = 'create'"
+                ><Plus /> New profile</Button
+            >
+        </div>
 
-        <section class="rounded-lg border bg-card p-5 sm:p-7">
-            <div class="flex items-start gap-3">
+        <section
+            v-show="section === 'create'"
+            class="min-w-0 rounded-lg border bg-card p-5 sm:p-6"
+        >
+            <div class="flex min-w-0 items-start gap-3">
                 <div
                     class="grid size-10 shrink-0 place-items-center rounded-md border border-schedule/30 bg-schedule/10 text-schedule"
                 >
@@ -100,9 +149,9 @@ defineOptions({
                         Add a signatory profile
                     </h2>
                     <p class="mt-1 text-sm leading-6 text-muted-foreground">
-                        Validity is inclusive. A replacement image is stored
-                        privately and only its historical snapshot is visible in
-                        the inbox.
+                        Choose a member and enter their signing details. Changes
+                        apply to future approvals; past decisions keep their
+                        original details.
                     </p>
                 </div>
             </div>
@@ -111,14 +160,30 @@ defineOptions({
                 class="mt-6 grid gap-4 lg:grid-cols-2"
                 enctype="multipart/form-data"
                 v-slot="{ errors, processing }"
+                reset-on-success
+                @success="saved"
             >
+                <ValidationSummary
+                    :errors="errors"
+                    title="Check the signatory details"
+                    class="lg:col-span-2"
+                    :field-ids="{
+                        membership_id: 'profile-member',
+                        name: 'profile-name',
+                        position: 'profile-position',
+                        academic_unit_id: 'profile-unit',
+                        valid_from: 'profile-from',
+                        valid_until: 'profile-until',
+                        signature_image: 'profile-image',
+                    }"
+                />
                 <div class="grid gap-2">
                     <Label for="profile-member">Organization member</Label
                     ><select
                         id="profile-member"
                         name="membership_id"
                         required
-                        class="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
+                        class="h-9 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                         <option value="">Select a member</option>
                         <option
@@ -165,7 +230,7 @@ defineOptions({
                     ><select
                         id="profile-unit"
                         name="academic_unit_id"
-                        class="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
+                        class="h-9 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                         <option value="">Organization-wide</option>
                         <option
@@ -218,172 +283,262 @@ defineOptions({
             </Form>
         </section>
 
-        <WorkspaceState
-            v-if="props.profiles.length === 0"
-            variant="empty"
-            title="No signatory profiles yet"
-            description="Add a profile above before approvers begin signing workflow decisions."
-        />
-        <div v-else class="grid gap-5 lg:grid-cols-2">
-            <details
-                v-for="profile in props.profiles"
-                :key="profile.id"
-                class="group rounded-lg border bg-card p-5"
+        <section
+            v-show="section === 'directory'"
+            class="min-w-0 space-y-4"
+            aria-label="Signatory directory"
+        >
+            <div
+                class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
             >
-                <summary
-                    class="flex cursor-pointer list-none items-start justify-between gap-4"
-                >
-                    <div class="flex items-start gap-3">
-                        <div
-                            class="grid size-10 shrink-0 place-items-center rounded-md border border-schedule/25 bg-schedule/10 text-schedule"
-                        >
-                            <UserRound class="size-5" />
-                        </div>
-                        <div>
-                            <h2 class="font-semibold">{{ profile.name }}</h2>
-                            <p class="mt-1 text-sm text-muted-foreground">
-                                {{ profile.position }} · {{ profile.user_name }}
-                            </p>
-                            <p class="mt-2 text-xs text-muted-foreground">
-                                {{
-                                    profile.academic_unit_name ??
-                                    'Organization-wide'
-                                }}
-                                · {{ validityLabel(profile) }}
-                            </p>
-                        </div>
-                    </div>
-                    <Pencil
-                        class="mt-1 size-4 text-muted-foreground transition group-open:rotate-45"
-                    />
-                </summary>
-                <div class="mt-5 border-t pt-5">
-                    <div class="mb-5 flex flex-wrap items-center gap-2">
-                        <Badge
-                            variant="outline"
-                            class="border-schedule/30 bg-schedule/10 text-schedule"
-                            >{{
-                                profile.has_signature
-                                    ? 'Private signature attached'
-                                    : 'No signature image'
-                            }}</Badge
-                        ><Badge variant="outline"
-                            ><CalendarDays />
-                            {{ validityLabel(profile) }}</Badge
-                        ><a
-                            v-if="profile.signature_download_url"
-                            :href="profile.signature_download_url"
-                            class="text-sm font-medium text-schedule underline-offset-4 hover:underline"
-                            >Download signature</a
-                        >
-                    </div>
-                    <Form
-                        v-bind="
-                            update.form([organization?.slug ?? '', profile.id])
-                        "
-                        class="grid gap-4 sm:grid-cols-2"
-                        enctype="multipart/form-data"
-                        v-slot="{ errors, processing }"
-                    >
-                        <div class="grid gap-2">
-                            <Label :for="'edit-name-' + profile.id"
-                                >Signatory name</Label
-                            ><Input
-                                :id="'edit-name-' + profile.id"
-                                name="name"
-                                :default-value="profile.name"
-                                required
-                            />
-                            <p
-                                v-if="errors.name"
-                                class="text-sm text-destructive"
-                            >
-                                {{ errors.name }}
-                            </p>
-                        </div>
-                        <div class="grid gap-2">
-                            <Label :for="'edit-position-' + profile.id"
-                                >Position</Label
-                            ><Input
-                                :id="'edit-position-' + profile.id"
-                                name="position"
-                                :default-value="profile.position"
-                                required
-                            />
-                            <p
-                                v-if="errors.position"
-                                class="text-sm text-destructive"
-                            >
-                                {{ errors.position }}
-                            </p>
-                        </div>
-                        <div class="grid gap-2">
-                            <Label :for="'edit-unit-' + profile.id"
-                                >Academic unit</Label
-                            ><select
-                                :id="'edit-unit-' + profile.id"
-                                name="academic_unit_id"
-                                class="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
-                            >
-                                <option value="">Organization-wide</option>
-                                <option
-                                    v-for="unit in props.units"
-                                    :key="unit.id"
-                                    :value="unit.id"
-                                    :selected="
-                                        unit.id === profile.academic_unit_id
-                                    "
-                                >
-                                    {{ unit.name }}
-                                </option>
-                            </select>
-                        </div>
-                        <div class="grid gap-2">
-                            <Label :for="'edit-from-' + profile.id"
-                                >Valid from</Label
-                            ><Input
-                                :id="'edit-from-' + profile.id"
-                                name="valid_from"
-                                type="date"
-                                :default-value="profile.valid_from ?? undefined"
-                            />
-                        </div>
-                        <div class="grid gap-2">
-                            <Label :for="'edit-until-' + profile.id"
-                                >Valid until</Label
-                            ><Input
-                                :id="'edit-until-' + profile.id"
-                                name="valid_until"
-                                type="date"
-                                :default-value="
-                                    profile.valid_until ?? undefined
-                                "
-                            />
-                            <p
-                                v-if="errors.valid_until"
-                                class="text-sm text-destructive"
-                            >
-                                {{ errors.valid_until }}
-                            </p>
-                        </div>
-                        <div class="grid gap-2">
-                            <Label :for="'edit-image-' + profile.id"
-                                >Replace signature image</Label
-                            ><Input
-                                :id="'edit-image-' + profile.id"
-                                name="signature_image"
-                                type="file"
-                                accept="image/jpeg,image/png,image/webp"
-                            />
-                        </div>
-                        <div class="sm:col-span-2">
-                            <Button type="submit" :disabled="processing"
-                                ><BadgeCheck /> Update profile</Button
-                            >
-                        </div>
-                    </Form>
+                <div>
+                    <h2 class="text-base font-semibold">People who sign</h2>
+                    <p class="mt-1 text-sm break-words text-muted-foreground">
+                        Open a profile to update its details or signature.
+                    </p>
                 </div>
-            </details>
-        </div>
+                <div v-if="profiles.length" class="relative w-full sm:max-w-72">
+                    <Search
+                        class="pointer-events-none absolute top-2.5 left-3 size-4 text-muted-foreground"
+                    /><Input
+                        v-model="search"
+                        type="search"
+                        aria-label="Search signatory profiles"
+                        placeholder="Find a name, position, or unit..."
+                        class="pl-9"
+                    />
+                </div>
+            </div>
+            <WorkspaceState
+                v-if="props.profiles.length === 0"
+                variant="empty"
+                title="No signatory profiles yet"
+                description="Add an approver's name, position, and optional signature image for future timetable approvals."
+                ><template #action
+                    ><Button @click="section = 'create'"
+                        ><Plus /> Add a signatory</Button
+                    ></template
+                ></WorkspaceState
+            >
+            <WorkspaceState
+                v-else-if="visibleProfiles.length === 0"
+                variant="empty"
+                title="No matching profiles"
+                description="Try another name, position, or academic unit."
+                ><template #action
+                    ><Button variant="outline" @click="search = ''"
+                        >Clear search</Button
+                    ></template
+                ></WorkspaceState
+            >
+            <div
+                v-else
+                class="divide-y overflow-hidden rounded-lg border bg-card"
+            >
+                <details
+                    v-for="profile in visibleProfiles"
+                    :key="profile.id"
+                    class="group min-w-0"
+                >
+                    <summary
+                        class="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3 p-4 hover:bg-muted/30 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+                    >
+                        <div class="flex min-w-0 items-start gap-3">
+                            <div
+                                class="grid size-10 shrink-0 place-items-center rounded-md border border-schedule/25 bg-schedule/10 text-schedule"
+                            >
+                                <UserRound class="size-5" />
+                            </div>
+                            <div class="min-w-0">
+                                <h3 class="font-semibold break-words">
+                                    {{ profile.name }}
+                                </h3>
+                                <p
+                                    class="mt-1 text-sm break-words text-muted-foreground"
+                                >
+                                    {{ profile.position }} ·
+                                    {{ profile.user_name }}
+                                </p>
+                                <p class="mt-2 text-xs text-muted-foreground">
+                                    {{
+                                        profile.academic_unit_name ??
+                                        'Organization-wide'
+                                    }}
+                                    · {{ validityLabel(profile) }}
+                                </p>
+                            </div>
+                        </div>
+                        <span class="flex items-center gap-3 pl-13 sm:pl-0"
+                            ><Badge
+                                variant="outline"
+                                :class="
+                                    profile.has_signature
+                                        ? 'border-available/30 bg-available/10 text-available'
+                                        : 'border-warning/30 bg-warning/10 text-foreground'
+                                "
+                                >{{
+                                    profile.has_signature
+                                        ? 'Signature attached'
+                                        : 'No signature image'
+                                }}</Badge
+                            ><ChevronDown
+                                class="size-4 text-muted-foreground transition-transform group-open:rotate-180 motion-reduce:transition-none"
+                        /></span>
+                    </summary>
+                    <div class="space-y-4 border-t bg-muted/15 p-4 sm:p-5">
+                        <div class="mb-5 flex flex-wrap items-center gap-2">
+                            <Badge
+                                variant="outline"
+                                class="border-schedule/30 bg-schedule/10 text-schedule"
+                                >{{
+                                    profile.has_signature
+                                        ? 'Private signature attached'
+                                        : 'No signature image'
+                                }}</Badge
+                            ><Badge variant="outline"
+                                ><CalendarDays />
+                                {{ validityLabel(profile) }}</Badge
+                            ><a
+                                v-if="profile.signature_download_url"
+                                :href="profile.signature_download_url"
+                                class="text-sm font-medium text-schedule underline-offset-4 hover:underline"
+                                >Download signature</a
+                            >
+                        </div>
+                        <Form
+                            v-bind="
+                                update.form([
+                                    organization?.slug ?? '',
+                                    profile.id,
+                                ])
+                            "
+                            class="grid gap-4 sm:grid-cols-2"
+                            enctype="multipart/form-data"
+                            v-slot="{ errors, processing }"
+                        >
+                            <ValidationSummary
+                                :errors="errors"
+                                title="Check the profile changes"
+                                class="sm:col-span-2"
+                                :field-ids="{
+                                    name: 'edit-name-' + profile.id,
+                                    position: 'edit-position-' + profile.id,
+                                    academic_unit_id: 'edit-unit-' + profile.id,
+                                    valid_from: 'edit-from-' + profile.id,
+                                    valid_until: 'edit-until-' + profile.id,
+                                    signature_image: 'edit-image-' + profile.id,
+                                }"
+                            />
+                            <div class="grid gap-2">
+                                <Label :for="'edit-name-' + profile.id"
+                                    >Signatory name</Label
+                                ><Input
+                                    :id="'edit-name-' + profile.id"
+                                    name="name"
+                                    :default-value="profile.name"
+                                    required
+                                />
+                                <p
+                                    v-if="errors.name"
+                                    class="text-sm text-destructive"
+                                >
+                                    {{ errors.name }}
+                                </p>
+                            </div>
+                            <div class="grid gap-2">
+                                <Label :for="'edit-position-' + profile.id"
+                                    >Position</Label
+                                ><Input
+                                    :id="'edit-position-' + profile.id"
+                                    name="position"
+                                    :default-value="profile.position"
+                                    required
+                                />
+                                <p
+                                    v-if="errors.position"
+                                    class="text-sm text-destructive"
+                                >
+                                    {{ errors.position }}
+                                </p>
+                            </div>
+                            <div class="grid gap-2">
+                                <Label :for="'edit-unit-' + profile.id"
+                                    >Academic unit</Label
+                                ><select
+                                    :id="'edit-unit-' + profile.id"
+                                    name="academic_unit_id"
+                                    class="h-9 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                >
+                                    <option value="">Organization-wide</option>
+                                    <option
+                                        v-for="unit in props.units"
+                                        :key="unit.id"
+                                        :value="unit.id"
+                                        :selected="
+                                            unit.id === profile.academic_unit_id
+                                        "
+                                    >
+                                        {{ unit.name }}
+                                    </option>
+                                </select>
+                            </div>
+                            <div class="grid gap-2">
+                                <Label :for="'edit-from-' + profile.id"
+                                    >Valid from</Label
+                                ><Input
+                                    :id="'edit-from-' + profile.id"
+                                    name="valid_from"
+                                    type="date"
+                                    :default-value="
+                                        profile.valid_from ?? undefined
+                                    "
+                                />
+                            </div>
+                            <div class="grid gap-2">
+                                <Label :for="'edit-until-' + profile.id"
+                                    >Valid until</Label
+                                ><Input
+                                    :id="'edit-until-' + profile.id"
+                                    name="valid_until"
+                                    type="date"
+                                    :default-value="
+                                        profile.valid_until ?? undefined
+                                    "
+                                />
+                                <p
+                                    v-if="errors.valid_until"
+                                    class="text-sm text-destructive"
+                                >
+                                    {{ errors.valid_until }}
+                                </p>
+                            </div>
+                            <div class="grid gap-2">
+                                <Label :for="'edit-image-' + profile.id"
+                                    >Replace signature image</Label
+                                ><Input
+                                    :id="'edit-image-' + profile.id"
+                                    name="signature_image"
+                                    type="file"
+                                    accept="image/jpeg,image/png,image/webp"
+                                />
+                            </div>
+                            <div class="sm:col-span-2">
+                                <Button type="submit" :disabled="processing"
+                                    ><BadgeCheck /> Update profile</Button
+                                >
+                            </div>
+                        </Form>
+                    </div>
+                </details>
+            </div>
+            <p
+                v-if="profiles.length"
+                class="flex items-start gap-2 text-xs leading-5 text-muted-foreground"
+            >
+                <BadgeCheck class="mt-0.5 size-4 shrink-0" />Signature images
+                stay private. Updating a profile does not change past approval
+                records.
+            </p>
+        </section>
     </div>
 </template>

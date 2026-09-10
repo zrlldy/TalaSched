@@ -15,6 +15,31 @@ use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Inertia\Testing\AssertableInertia as Assert;
 
+test('invalid academic period dates and duplicate sequences return correctable field errors', function (array $changes, string $field): void {
+    $owner = User::factory()->withOwnedOrganization()->create();
+    $organization = $owner->currentOrganization;
+    $year = AcademicYear::factory()->forOrganization($organization)->create(['starts_on' => '2026-08-01', 'ends_on' => '2027-07-31']);
+    AcademicPeriod::factory()->forAcademicYear($year)->create(['sequence' => 1, 'starts_on' => '2026-08-01', 'ends_on' => '2026-12-31']);
+
+    $this->actingAs($owner)
+        ->from(route('academic.setup', $organization))
+        ->post(route('academic.periods.store', [$organization, $year->public_id]), array_merge([
+            'name' => 'Second period', 'kind' => 'term', 'sequence' => 2,
+            'starts_on' => '2027-01-01', 'ends_on' => '2027-05-31',
+        ], $changes))
+        ->assertRedirect(route('academic.setup', $organization))
+        ->assertSessionHasErrors($field);
+
+    expect($year->periods()->count())->toBe(1)
+        ->and(DB::table('audit_events')->where('action', 'academic_period.created')->count())->toBe(0);
+})->with([
+    'starts before the year' => [['starts_on' => '2026-07-01'], 'starts_on'],
+    'ends after the year' => [['ends_on' => '2027-08-01'], 'ends_on'],
+    'duplicate sequence' => [['sequence' => 1], 'sequence'],
+    'reversed dates' => [['ends_on' => '2026-12-01'], 'ends_on'],
+    'overlapping period' => [['starts_on' => '2026-12-15'], 'periods'],
+]);
+
 test('academic setup exposes public-id contracts and manages years, periods, and presets', function (): void {
     $owner = User::factory()->withOwnedOrganization()->create();
     $organization = $owner->currentOrganization;
@@ -166,6 +191,25 @@ test('academic setup exposes public-id contracts and manages years, periods, and
         ->and(DB::table('audit_events')->where('action', 'student_group.period_enrolled')->value('actor_user_id'))
         ->toBe($owner->getKey());
 });
+
+test('student group date forms accept either optional date boundary', function (array $data): void {
+    $owner = User::factory()->withOwnedOrganization()->create();
+    $organization = $owner->currentOrganization;
+    $year = AcademicYear::factory()->forOrganization($organization)->create(['starts_on' => '2026-08-01', 'ends_on' => '2027-07-31']);
+    $unit = AcademicUnit::factory()->forOrganization($organization)->create();
+    $group = StudentGroup::factory()->forAcademicYear($year)->forAcademicUnit($unit)->create();
+
+    $this->actingAs($owner)->post(route('academic.groups.dates', [$organization, $group->public_id]), $data)
+        ->assertSessionHasNoErrors()->assertRedirect();
+    expect($group->fresh()->active_from?->toDateString())->toBe(($data['active_from'] ?? '') ?: null)
+        ->and($group->fresh()->active_until?->toDateString())->toBe(($data['active_until'] ?? '') ?: null);
+})->with([
+    'both boundaries' => [['active_from' => '2026-08-01', 'active_until' => '2026-12-31']],
+    'start only' => [['active_from' => '2026-08-01', 'active_until' => '']],
+    'end only' => [['active_from' => '', 'active_until' => '2026-12-31']],
+    'omitted start' => [['active_until' => '2026-12-31']],
+    'blank boundaries' => [['active_from' => '', 'active_until' => '']],
+]);
 
 test('academic setup mutations require the academic management permission', function (): void {
     $owner = User::factory()->withOwnedOrganization()->create();

@@ -228,6 +228,8 @@ test('signatory administration stores private assets and exposes only safe profi
     ]))->assertInertia(fn (Assert $page): Assert => $page
         ->component('approvals/Signatories')
         ->where('profiles.0.id', $profile->public_id)
+        ->where('profiles.0.valid_from', now()->toDateString())
+        ->where('profiles.0.valid_until', now()->addYear()->toDateString())
         ->where('profiles.0.has_signature', true)
         ->has('profiles.0.signature_download_url')
         ->missing('profiles.0.signature_path')

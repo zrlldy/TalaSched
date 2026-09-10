@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import ValidationSummary from '@/components/ValidationSummary.vue';
 import { destroy } from '@/routes/organizations';
 import type { Organization } from '@/types';
 
@@ -55,13 +56,19 @@ const handleOpenChange = (nextOpen: boolean) => {
                 @success="handleOpenChange(false)"
             >
                 <DialogHeader>
-                    <DialogTitle>Are you sure?</DialogTitle>
+                    <DialogTitle>Delete organization</DialogTitle>
                     <DialogDescription>
                         This action cannot be undone. This will permanently
                         delete the organization
                         <strong>"{{ props.organization.name }}"</strong>.
                     </DialogDescription>
                 </DialogHeader>
+
+                <ValidationSummary
+                    :errors="errors"
+                    title="Organization could not be deleted"
+                    :field-ids="{ name: 'confirmation-name' }"
+                />
 
                 <div class="space-y-4 py-4">
                     <div class="grid gap-2">
@@ -84,7 +91,9 @@ const handleOpenChange = (nextOpen: boolean) => {
 
                 <DialogFooter class="gap-2">
                     <DialogClose as-child>
-                        <Button variant="secondary"> Cancel </Button>
+                        <Button type="button" variant="secondary">
+                            Cancel
+                        </Button>
                     </DialogClose>
 
                     <Button

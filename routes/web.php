@@ -35,6 +35,7 @@ Route::prefix('{current_organization}')
         Route::post('catalog/subjects', [ResourceSetupController::class, 'storeSubject'])->name('catalog.subjects.store');
         Route::post('catalog/components', [ResourceSetupController::class, 'storeSubjectComponent'])->name('catalog.components.store');
         Route::post('catalog/offerings', [ResourceSetupController::class, 'storeOffering'])->name('catalog.offerings.store');
+        Route::post('catalog/offerings/components', [ResourceSetupController::class, 'addOfferingComponent'])->name('catalog.offerings.components');
         Route::post('catalog/offerings/instructors', [ResourceSetupController::class, 'assignOfferingInstructor'])->name('catalog.offerings.instructors');
         Route::post('catalog/offerings/status', [ResourceSetupController::class, 'updateOfferingStatus'])->name('catalog.offerings.status');
         Route::post('academic/years', [AcademicSetupController::class, 'storeYear'])->name('academic.years.store');

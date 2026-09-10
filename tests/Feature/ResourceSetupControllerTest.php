@@ -14,14 +14,70 @@ use App\Models\AcademicYear;
 use App\Models\FacultyProfile;
 use App\Models\OfferingComponent;
 use App\Models\Organization;
+use App\Models\ResourceAvailabilityRule;
 use App\Models\Room;
 use App\Models\SchedulingResource;
 use App\Models\StudentGroup;
 use App\Models\Subject;
+use App\Models\SubjectComponent;
 use App\Models\SubjectOffering;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Inertia\Testing\AssertableInertia as Assert;
+
+test('saved availability exposes readable tenant scoped hours and dates without internal identifiers', function (): void {
+    $owner = User::factory()->withOwnedOrganization()->create();
+    $organization = $owner->currentOrganization;
+    $resource = SchedulingResource::factory()->faculty()->create(['organization_id' => $organization->id, 'name' => 'Teacher Maria Santos']);
+    ResourceAvailabilityRule::factory()->forResource($resource)->create(['starts_at_minute' => 510, 'effective_from' => '2026-09-01', 'effective_until' => '2026-12-31']);
+    ResourceAvailabilityRule::factory()->create();
+    $this->actingAs($owner)->get(route('resources.setup', $organization))->assertInertia(fn (Assert $page) => $page
+        ->has('availabilityRules', 1)
+        ->where('availabilityRules.0.resource_name', 'Teacher Maria Santos')
+        ->where('availabilityRules.0.starts_at_minute', 510)
+        ->where('availabilityRules.0.ends_at_minute', 1020)
+        ->where('availabilityRules.0.effective_from', '2026-09-01')
+        ->where('availabilityRules.0.effective_until', '2026-12-31')
+        ->where('availabilityRules.0.period_name', null)
+        ->missing('availabilityRules.0.id')
+        ->missing('availabilityRules.0.organization_id'));
+});
+
+test('catalog managers can recover empty offerings without replacing existing component snapshots', function (): void {
+    $owner = User::factory()->withOwnedOrganization()->create();
+    $organization = $owner->currentOrganization;
+    $period = AcademicPeriod::factory()->forAcademicYear(AcademicYear::factory()->forOrganization($organization)->create())->create();
+    $offering = SubjectOffering::factory()->forAcademicPeriod($period)->create();
+    $source = SubjectComponent::factory()->forSubject($offering->subject)->create();
+    $payload = ['offering_id' => $offering->public_id];
+    $endpoint = route('catalog.offerings.components', $organization);
+
+    $this->actingAs($owner)->get(route('resources.setup', $organization))->assertInertia(fn (Assert $page) => $page
+        ->where('offerings.0.components_count', 0)
+        ->where('offerings.0.available_components.0.name', $source->name));
+    $this->post($endpoint, $payload)->assertSessionHasNoErrors()->assertRedirect(route('resources.setup', [$organization, 'section' => 'offerings']));
+    $snapshot = $offering->components()->sole();
+    expect($snapshot->duration_minutes)->toBe($source->default_duration_minutes);
+    $this->assertDatabaseHas('audit_events', ['organization_id' => $organization->id, 'action' => 'subject_offering.component_snapshot_created']);
+    $this->get(route('resources.setup', $organization))->assertInertia(fn (Assert $page) => $page
+        ->where('offerings.0.components_count', 1)->where('offerings.0.available_components', []));
+
+    $source->update(['default_duration_minutes' => 120]);
+    $this->post($endpoint, $payload)->assertSessionHasNoErrors();
+    expect($snapshot->fresh()->duration_minutes)->toBe(90)->and($offering->components()->count())->toBe(1);
+
+    $otherSubject = Subject::factory()->forOrganization($organization)->create();
+    SubjectComponent::factory()->forSubject($otherSubject)->create();
+    SubjectComponent::factory()->create();
+    $emptyOffering = SubjectOffering::factory()->forAcademicPeriod($period)->create();
+    $this->post($endpoint, ['offering_id' => $emptyOffering->public_id])->assertSessionHasErrors('components');
+    $this->post($endpoint, [...$payload, 'offering_id' => SubjectOffering::factory()->create()->public_id])->assertSessionHasErrors('offering_id');
+    $this->post($endpoint, [...$payload, 'offering_id' => (string) $offering->id])->assertSessionHasErrors('offering_id');
+    $viewer = User::factory()->create();
+    $organization->members()->attach($viewer, ['role' => OrganizationRole::Member]);
+    $this->actingAs($viewer)->post($endpoint, $payload)->assertForbidden();
+    expect($offering->components()->count())->toBe(1);
+});
 
 test('catalog managers can prepare an offering teaching team and activate it', function (): void {
     $owner = User::factory()->withOwnedOrganization()->create();
@@ -215,6 +271,51 @@ test('resource setup exposes public contracts and creates the dependency chain',
             ->where('subjects.0.id', $subject->public_id)
             ->where('offerings.0.components_count', 1));
 });
+
+test('faculty creation accepts browser load limits and keeps omitted limits optional', function (array $limits, ?int $daily, ?int $weekly): void {
+    $owner = User::factory()->withOwnedOrganization()->create();
+    $organization = $owner->currentOrganization;
+
+    $this->actingAs($owner)
+        ->post(route('resources.faculty.store', $organization), [
+            'resource_name' => 'Teacher Maria Santos',
+            ...$limits,
+        ])
+        ->assertSessionHasNoErrors()
+        ->assertRedirect(route('resources.setup', $organization));
+
+    $profile = FacultyProfile::query()->where('organization_id', $organization->id)->sole();
+    expect($profile->resource->name)->toBe('Teacher Maria Santos')
+        ->and($profile->maximum_daily_minutes)->toBe($daily)
+        ->and($profile->maximum_weekly_minutes)->toBe($weekly);
+})->with([
+    'browser numeric strings' => [['maximum_daily_minutes' => '480', 'maximum_weekly_minutes' => '2400'], 480, 2400],
+    'blank inputs' => [['maximum_daily_minutes' => '', 'maximum_weekly_minutes' => ''], null, null],
+    'omitted inputs' => [[], null, null],
+    'daily only' => [['maximum_daily_minutes' => '480', 'maximum_weekly_minutes' => ''], 480, null],
+    'weekly only' => [['maximum_daily_minutes' => '', 'maximum_weekly_minutes' => '2400'], null, 2400],
+]);
+
+test('faculty creation reports invalid load limits against the editable fields', function (array $limits, string $field): void {
+    $owner = User::factory()->withOwnedOrganization()->create();
+    $organization = $owner->currentOrganization;
+
+    $this->actingAs($owner)
+        ->post(route('resources.faculty.store', $organization), [
+            'resource_name' => 'Invalid teacher',
+            ...$limits,
+        ])
+        ->assertSessionHasErrors($field);
+
+    expect(FacultyProfile::query()->where('organization_id', $organization->id)->count())->toBe(0)
+        ->and(SchedulingResource::query()->where('organization_id', $organization->id)->count())->toBe(0);
+})->with([
+    'daily zero' => [['maximum_daily_minutes' => '0'], 'maximum_daily_minutes'],
+    'weekly negative' => [['maximum_weekly_minutes' => '-1'], 'maximum_weekly_minutes'],
+    'fractional minutes' => [['maximum_daily_minutes' => '1.5'], 'maximum_daily_minutes'],
+    'invalid text' => [['maximum_daily_minutes' => 'full time'], 'maximum_daily_minutes'],
+    'weekly below daily' => [['maximum_daily_minutes' => '480', 'maximum_weekly_minutes' => '120'], 'maximum_weekly_minutes'],
+]);
 
 test('resource setup mutations require resource or catalog permissions', function (): void {
     $owner = User::factory()->withOwnedOrganization()->create();

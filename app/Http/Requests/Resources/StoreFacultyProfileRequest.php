@@ -28,12 +28,29 @@ class StoreFacultyProfileRequest extends FormRequest
             'position' => ['nullable', 'string', 'max:255'],
             'employment_type' => ['nullable', Rule::enum(FacultyEmploymentType::class)],
             'maximum_daily_minutes' => ['nullable', 'integer', 'min:1'],
-            'maximum_weekly_minutes' => ['nullable', 'integer', 'min:1', 'gte:maximum_daily_minutes'],
+            'maximum_weekly_minutes' => [
+                'nullable',
+                'integer',
+                'min:1',
+                Rule::when($this->filled('maximum_daily_minutes'), 'gte:maximum_daily_minutes'),
+            ],
             'academic_unit_id' => [
                 'nullable',
                 'string',
                 Rule::exists('academic_units', 'public_id')->where('organization_id', $this->organizationId()),
             ],
+        ];
+    }
+
+    /** @return array<string, string> */
+    public function messages(): array
+    {
+        return [
+            'maximum_daily_minutes.min' => 'Enter at least 1 minute, or leave the daily teaching limit blank.',
+            'maximum_weekly_minutes.min' => 'Enter at least 1 minute, or leave the weekly teaching limit blank.',
+            'maximum_daily_minutes.integer' => 'Enter a whole number of minutes for the daily teaching limit.',
+            'maximum_weekly_minutes.integer' => 'Enter a whole number of minutes for the weekly teaching limit.',
+            'maximum_weekly_minutes.gte' => 'The weekly teaching limit must be at least the daily teaching limit.',
         ];
     }
 

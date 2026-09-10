@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { Form, router } from '@inertiajs/vue3';
-import { LockKeyhole, Pencil, Plus, ShieldCheck, Trash2 } from '@lucide/vue';
+import { Form } from '@inertiajs/vue3';
+import { Pencil, Plus, Search, ShieldCheck, Trash2 } from '@lucide/vue';
 import { computed, ref } from 'vue';
-import Heading from '@/components/Heading.vue';
 import InputError from '@/components/InputError.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -17,6 +16,8 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import ValidationSummary from '@/components/ValidationSummary.vue';
+import WorkspaceState from '@/components/WorkspaceState.vue';
 import { destroy, store, update } from '@/routes/organizations/roles';
 import type {
     Organization,
@@ -37,6 +38,14 @@ const props = defineProps<Props>();
 const editorOpen = ref(false);
 const editingRole = ref<OrganizationRoleDefinition | null>(null);
 const formKey = ref(0);
+const search = ref('');
+const roleToDelete = ref<OrganizationRoleDefinition | null>(null);
+const deleteDialogOpen = ref(false);
+const filteredRoles = computed(() =>
+    props.roles.filter((role) =>
+        role.name.toLowerCase().includes(search.value.trim().toLowerCase()),
+    ),
+);
 
 const editorTitle = computed(() =>
     editingRole.value ? 'Edit custom role' : 'Create custom role',
@@ -71,19 +80,15 @@ function openEdit(role: OrganizationRoleDefinition): void {
 }
 
 function closeEditor(): void {
+    search.value = '';
     editorOpen.value = false;
     editingRole.value = null;
     formKey.value++;
 }
 
 function deleteRole(role: OrganizationRoleDefinition): void {
-    if (!window.confirm('Delete the custom role "' + role.name + '"?')) {
-        return;
-    }
-
-    router.delete(destroy.url([props.organization.slug, role.code]), {
-        preserveScroll: true,
-    });
+    roleToDelete.value = role;
+    deleteDialogOpen.value = true;
 }
 
 function roleHasPermission(
@@ -95,13 +100,20 @@ function roleHasPermission(
 </script>
 
 <template>
-    <section class="space-y-6" data-test="organization-roles-section">
+    <section
+        class="space-y-4"
+        data-test="organization-roles-section"
+        aria-labelledby="roles-heading"
+    >
         <div class="flex items-start justify-between gap-4">
-            <Heading
-                variant="small"
-                title="Roles and permissions"
-                description="Shape access around the way your organization works."
-            />
+            <div>
+                <h2 id="roles-heading" class="text-base font-semibold">
+                    Roles and permissions
+                </h2>
+                <p class="mt-1 text-sm text-muted-foreground">
+                    Review what each role can do in this organization.
+                </p>
+            </div>
 
             <Button
                 v-if="canManageRoles"
@@ -113,22 +125,13 @@ function roleHasPermission(
             </Button>
         </div>
 
-        <div
+        <WorkspaceState
             v-if="!customRolesEnabled"
-            class="flex items-start gap-3 rounded-lg border border-warning/30 bg-warning/10 p-4 text-warning-foreground"
             data-test="roles-entitlement-feedback"
-        >
-            <LockKeyhole class="mt-0.5 h-4 w-4 shrink-0" />
-            <div class="space-y-1 text-sm">
-                <p class="font-medium">
-                    Custom roles are not included in this plan.
-                </p>
-                <p class="text-warning-foreground/75">
-                    Built-in roles remain available. Upgrade the organization
-                    plan to create custom permission sets.
-                </p>
-            </div>
-        </div>
+            variant="entitlement"
+            title="Custom roles are not included in this plan"
+            description="Built-in roles remain available. Ask the organization owner about a plan with custom roles to create your own permission sets."
+        />
 
         <div
             v-else-if="!canManageRoles"
@@ -139,11 +142,36 @@ function roleHasPermission(
             member-management permission.
         </div>
 
-        <div class="grid gap-3">
+        <div class="relative max-w-sm">
+            <Search
+                class="pointer-events-none absolute top-2.5 left-3 size-4 text-muted-foreground"
+                aria-hidden="true"
+            />
+            <Input
+                v-model="search"
+                type="search"
+                aria-label="Search roles"
+                placeholder="Find a role..."
+                class="pl-9"
+            />
+        </div>
+        <WorkspaceState
+            v-if="filteredRoles.length === 0"
+            variant="empty"
+            title="No matching roles"
+            description="Try a different name to find the role."
+        >
+            <template #action
+                ><Button variant="outline" @click="search = ''"
+                    >Clear search</Button
+                ></template
+            >
+        </WorkspaceState>
+        <div v-else class="divide-y overflow-hidden rounded-lg border bg-card">
             <div
-                v-for="role in roles"
+                v-for="role in filteredRoles"
                 :key="role.code"
-                class="rounded-lg border p-4"
+                class="p-4"
                 data-test="role-row"
             >
                 <div
@@ -177,6 +205,7 @@ function roleHasPermission(
                             variant="outline"
                             size="sm"
                             data-test="edit-role-button"
+                            :aria-label="`Edit ${role.name}`"
                             @click="openEdit(role)"
                         >
                             <Pencil />
@@ -187,6 +216,7 @@ function roleHasPermission(
                             variant="ghost"
                             size="sm"
                             data-test="delete-role-button"
+                            :aria-label="`Delete ${role.name}`"
                             @click="deleteRole(role)"
                         >
                             <Trash2 />
@@ -202,23 +232,35 @@ function roleHasPermission(
                     </div>
                 </div>
 
-                <div class="mt-4 flex flex-wrap gap-2">
-                    <Badge
-                        v-for="permission in availablePermissions.filter(
-                            (option) => roleHasPermission(role, option),
-                        )"
-                        :key="permission.code"
-                        variant="outline"
+                <details class="mt-3">
+                    <summary
+                        class="min-h-10 w-fit cursor-pointer rounded-sm py-3 text-xs font-medium text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring"
                     >
-                        {{ permission.name }}
-                    </Badge>
-                    <span
-                        v-if="role.permissions.length === 0"
-                        class="text-sm text-muted-foreground"
-                    >
-                        No permissions assigned
-                    </span>
-                </div>
+                        {{ role.permissions.length }}
+                        {{
+                            role.permissions.length === 1
+                                ? 'permission'
+                                : 'permissions'
+                        }}
+                    </summary>
+                    <div class="mt-3 flex flex-wrap gap-2">
+                        <Badge
+                            v-for="permission in availablePermissions.filter(
+                                (option) => roleHasPermission(role, option),
+                            )"
+                            :key="permission.code"
+                            variant="outline"
+                        >
+                            {{ permission.name }}
+                        </Badge>
+                        <span
+                            v-if="role.permissions.length === 0"
+                            class="text-sm text-muted-foreground"
+                        >
+                            No permissions assigned
+                        </span>
+                    </div>
+                </details>
             </div>
         </div>
 
@@ -239,6 +281,15 @@ function roleHasPermission(
                         </DialogDescription>
                     </DialogHeader>
 
+                    <ValidationSummary
+                        :errors="errors"
+                        title="Check the role details"
+                        :field-ids="{
+                            name: 'role-name',
+                            permissions: 'role-permissions',
+                        }"
+                    />
+
                     <div class="grid gap-2">
                         <Label for="role-name">Role name</Label>
                         <Input
@@ -247,17 +298,24 @@ function roleHasPermission(
                             :default-value="editingRole?.name ?? ''"
                             placeholder="Department coordinator"
                             required
+                            :aria-invalid="Boolean(errors.name)"
+                            aria-describedby="role-name-error"
                         />
-                        <InputError :message="errors.name" />
+                        <InputError
+                            id="role-name-error"
+                            :message="errors.name"
+                        />
                     </div>
 
-                    <div class="space-y-3">
-                        <div>
-                            <Label>Permissions</Label>
-                            <p class="text-sm text-muted-foreground">
-                                Select only the access this role needs.
-                            </p>
-                        </div>
+                    <fieldset
+                        id="role-permissions"
+                        tabindex="-1"
+                        class="min-w-0 space-y-3"
+                    >
+                        <legend class="text-sm font-medium">Permissions</legend>
+                        <p class="text-sm text-muted-foreground">
+                            Select only the access this role needs.
+                        </p>
                         <div class="grid gap-2 sm:grid-cols-2">
                             <label
                                 v-for="permission in availablePermissions"
@@ -289,11 +347,13 @@ function roleHasPermission(
                             </label>
                         </div>
                         <InputError :message="errors.permissions" />
-                    </div>
+                    </fieldset>
 
                     <DialogFooter class="gap-2">
                         <DialogClose as-child>
-                            <Button variant="secondary">Cancel</Button>
+                            <Button type="button" variant="secondary"
+                                >Cancel</Button
+                            >
                         </DialogClose>
                         <Button
                             type="submit"
@@ -302,6 +362,50 @@ function roleHasPermission(
                         >
                             {{ editingRole ? 'Save changes' : 'Create role' }}
                         </Button>
+                    </DialogFooter>
+                </Form>
+            </DialogContent>
+        </Dialog>
+
+        <Dialog v-model:open="deleteDialogOpen">
+            <DialogContent>
+                <Form
+                    v-if="roleToDelete"
+                    :key="roleToDelete.code"
+                    v-bind="
+                        destroy.form([organization.slug, roleToDelete.code])
+                    "
+                    class="space-y-6"
+                    v-slot="{ errors, processing }"
+                    @success="deleteDialogOpen = false"
+                >
+                    <DialogHeader>
+                        <DialogTitle>Delete custom role</DialogTitle>
+                        <DialogDescription
+                            >Delete "{{ roleToDelete.name }}" and its permission
+                            set? Only roles with no assigned members can be
+                            deleted.</DialogDescription
+                        >
+                    </DialogHeader>
+                    <ValidationSummary
+                        :errors="errors"
+                        title="Role could not be deleted"
+                    />
+                    <DialogFooter class="gap-2">
+                        <DialogClose as-child
+                            ><Button type="button" variant="secondary"
+                                >Keep role</Button
+                            ></DialogClose
+                        >
+                        <Button
+                            type="submit"
+                            variant="destructive"
+                            data-test="delete-role-confirm"
+                            :disabled="processing"
+                            >{{
+                                processing ? 'Deleting...' : 'Delete role'
+                            }}</Button
+                        >
                     </DialogFooter>
                 </Form>
             </DialogContent>

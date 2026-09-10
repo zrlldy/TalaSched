@@ -3,17 +3,23 @@ import { Form, Head, Link, usePage } from '@inertiajs/vue3';
 import {
     ArrowRight,
     Check,
+    ClipboardCheck,
     CircleAlert,
     Clock3,
     History,
+    RefreshCw,
+    Search,
     X,
 } from '@lucide/vue';
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
+import ApprovalNavigation from '@/components/ApprovalNavigation.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import ValidationSummary from '@/components/ValidationSummary.vue';
 import WorkspacePageHeader from '@/components/WorkspacePageHeader.vue';
-import WorkspaceState from '@/components/WorkspaceState.vue';
-import { decide, inbox, signatories, workflows } from '@/routes/approvals';
+import { decide, inbox } from '@/routes/approvals';
+import { show as showTimetable } from '@/routes/scheduling/timetables';
 import type { Organization } from '@/types';
 
 type Action = {
@@ -68,19 +74,44 @@ const selectedId = ref<string | null>(
         null,
 );
 const filter = ref<'pending' | 'history'>('pending');
+const search = ref('');
 const idempotencyKey = ref(crypto.randomUUID());
-
-const visibleInstances = computed(() =>
+const pendingCount = computed(
+    () =>
+        props.instances.filter((instance) => instance.status === 'pending')
+            .length,
+);
+const filteredInstances = computed(() =>
     props.instances.filter((instance) =>
         filter.value === 'pending'
             ? instance.status === 'pending'
             : instance.status !== 'pending',
     ),
 );
+const visibleInstances = computed(() => {
+    const query = search.value.trim().toLowerCase();
+
+    return filteredInstances.value.filter((instance) =>
+        [
+            instance.timetable_name,
+            instance.workflow_name,
+            instance.submitter_name,
+        ].some((value) => value.toLowerCase().includes(query)),
+    );
+});
 const selectedInstance = computed(
     () =>
-        props.instances.find((instance) => instance.id === selectedId.value) ??
+        visibleInstances.value.find(
+            (instance) => instance.id === selectedId.value,
+        ) ??
+        visibleInstances.value[0] ??
         null,
+);
+watch(
+    () => selectedInstance.value?.id,
+    () => {
+        idempotencyKey.value = crypto.randomUUID();
+    },
 );
 const statusLabel = (status: string): string =>
     status
@@ -88,7 +119,7 @@ const statusLabel = (status: string): string =>
         .replace(/\b\w/g, (letter) => letter.toUpperCase());
 const statusClass = (status: string): string => {
     if (status === 'approved') {
-        return 'border-schedule/30 bg-schedule/10 text-schedule';
+        return 'border-available/30 bg-available/10 text-available';
     }
 
     if (status === 'rejected' || status === 'changes_requested') {
@@ -103,7 +134,7 @@ const statusClass = (status: string): string => {
 };
 const stepClass = (status: string): string => {
     if (status === 'approved') {
-        return 'border-schedule bg-schedule text-white';
+        return 'border-available/30 bg-available/10 text-available';
     }
 
     if (status === 'active') {
@@ -125,10 +156,10 @@ const formatDate = (value: string | null): string =>
               year: 'numeric',
               hour: 'numeric',
               minute: '2-digit',
+              timeZone: page.props.organizationTimezone ?? undefined,
           }).format(new Date(value));
 const choose = (instance: Instance): void => {
     selectedId.value = instance.id;
-    idempotencyKey.value = crypto.randomUUID();
 };
 
 defineOptions({
@@ -148,125 +179,184 @@ defineOptions({
 </script>
 
 <template>
-    <Head title="Approval inbox" />
-    <div class="space-y-8">
+    <div class="mx-auto w-full max-w-7xl min-w-0 space-y-5 p-4 sm:p-6">
+        <Head title="Approval inbox" />
         <WorkspacePageHeader
-            section="Approvals"
+            section="Review & publish"
             title="Approval inbox"
-            description="Review timetable versions assigned to you, then leave an immutable decision trail."
+            description="Review submitted timetables and keep each decision with its version."
         >
-            <template #metadata
-                ><span
-                    >{{
-                        props.instances.filter(
-                            (instance) => instance.status === 'pending',
-                        ).length
-                    }}
-                    open requests</span
-                ><span>Decisions are snapshot-backed</span></template
-            >
             <template #actions>
-                <Button
-                    v-if="props.canManageApprovals"
-                    variant="outline"
-                    as-child
-                    ><Link :href="workflows(organization?.slug ?? '').url"
-                        >Workflow designer</Link
-                    ></Button
-                >
-                <Button
-                    v-if="props.canManageApprovals"
-                    variant="outline"
-                    as-child
-                    ><Link :href="signatories(organization?.slug ?? '').url"
-                        >Signatory profiles</Link
-                    ></Button
-                >
-                <Button variant="outline" as-child
-                    ><Link :href="inbox(organization?.slug ?? '').url"
-                        >Refresh inbox</Link
-                    ></Button
-                >
+                <Button variant="ghost" size="icon" as-child>
+                    <Link
+                        :href="inbox(organization?.slug ?? '').url"
+                        aria-label="Refresh inbox"
+                        ><RefreshCw class="size-4"
+                    /></Link>
+                </Button>
             </template>
         </WorkspacePageHeader>
-
-        <div
-            class="flex flex-wrap items-center gap-2 border-b border-border pb-3"
-        >
-            <Button
-                :variant="filter === 'pending' ? 'default' : 'ghost'"
-                size="sm"
-                @click="filter = 'pending'"
-                ><Clock3 /> Needs attention</Button
-            >
-            <Button
-                :variant="filter === 'history' ? 'default' : 'ghost'"
-                size="sm"
-                @click="filter = 'history'"
-                ><History /> History</Button
-            >
-        </div>
-
-        <WorkspaceState
-            v-if="visibleInstances.length === 0"
-            variant="empty"
-            :title="
-                filter === 'pending'
-                    ? 'Nothing is waiting on you'
-                    : 'No approval history yet'
-            "
-            :description="
-                filter === 'pending'
-                    ? 'New timetable submissions will appear here when a workflow step makes you eligible.'
-                    : 'Completed approval decisions will remain available here for historical review.'
-            "
+        <ApprovalNavigation
+            :organization-slug="organization?.slug ?? ''"
+            current="inbox"
+            :can-manage="canManageApprovals"
         />
 
         <div
-            v-else
-            class="grid gap-6 xl:grid-cols-[minmax(18rem,0.72fr)_minmax(0,1.4fr)]"
+            class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
         >
-            <div class="space-y-3">
-                <button
-                    v-for="instance in visibleInstances"
-                    :key="instance.id"
-                    type="button"
-                    class="w-full rounded-lg border bg-card p-4 text-left transition hover:border-schedule/50 focus-visible:ring-2 focus-visible:ring-ring"
-                    :class="
-                        selectedId === instance.id
-                            ? 'border-schedule shadow-sm'
-                            : 'border-border'
-                    "
-                    @click="choose(instance)"
+            <div
+                class="flex gap-1 self-start rounded-lg border bg-muted/50 p-1"
+                role="group"
+                aria-label="Approval filters"
+            >
+                <Button
+                    :variant="filter === 'pending' ? 'secondary' : 'ghost'"
+                    size="sm"
+                    :aria-pressed="filter === 'pending'"
+                    @click="filter = 'pending'"
                 >
-                    <div class="flex items-start justify-between gap-3">
-                        <div class="min-w-0">
-                            <p class="truncate font-semibold text-foreground">
-                                {{ instance.timetable_name }}
-                            </p>
-                            <p class="mt-1 text-sm text-muted-foreground">
-                                Version {{ instance.version_number }} ·
-                                {{ instance.workflow_name }}
-                            </p>
-                        </div>
-                        <Badge
-                            variant="outline"
-                            :class="statusClass(instance.status)"
-                            >{{ statusLabel(instance.status) }}</Badge
-                        >
-                    </div>
-                    <div
-                        class="mt-4 flex items-center justify-between gap-3 text-xs text-muted-foreground"
+                    <Clock3 /> Pending
+                    <span
+                        class="rounded-sm bg-background px-1.5 font-schedule text-xs tabular-nums"
+                        >{{ pendingCount }}</span
                     >
-                        <span>Submitted by {{ instance.submitter_name }}</span
-                        ><span>{{ formatDate(instance.updated_at) }}</span>
-                    </div>
-                </button>
+                </Button>
+                <Button
+                    :variant="filter === 'history' ? 'secondary' : 'ghost'"
+                    size="sm"
+                    :aria-pressed="filter === 'history'"
+                    @click="filter = 'history'"
+                >
+                    <History /> History
+                    <span
+                        class="rounded-sm bg-background px-1.5 font-schedule text-xs tabular-nums"
+                        >{{ instances.length - pendingCount }}</span
+                    >
+                </Button>
             </div>
+            <div class="relative w-full sm:max-w-72">
+                <Search
+                    class="pointer-events-none absolute top-2.5 left-3 size-4 text-muted-foreground"
+                />
+                <Input
+                    v-model="search"
+                    type="search"
+                    aria-label="Search approval requests"
+                    placeholder="Find a timetable or submitter..."
+                    class="pl-9"
+                />
+            </div>
+        </div>
+
+        <div
+            class="grid min-w-0 overflow-hidden rounded-lg border bg-card lg:grid-cols-[minmax(16rem,0.8fr)_minmax(0,1.5fr)]"
+        >
+            <section
+                class="min-w-0 border-b bg-muted/20 lg:border-r lg:border-b-0"
+                aria-label="Approval requests"
+            >
+                <div
+                    class="flex items-center justify-between border-b px-4 py-3"
+                >
+                    <h2 class="text-xs font-medium text-muted-foreground">
+                        {{
+                            filter === 'pending'
+                                ? 'Submitted for review'
+                                : 'Completed reviews'
+                        }}
+                    </h2>
+                    <span
+                        class="font-schedule text-xs text-muted-foreground"
+                        aria-live="polite"
+                        >{{ visibleInstances.length }} requests</span
+                    >
+                </div>
+                <div
+                    v-if="visibleInstances.length"
+                    class="max-h-80 overflow-y-auto lg:max-h-[65vh]"
+                >
+                    <button
+                        v-for="instance in visibleInstances"
+                        :key="instance.id"
+                        type="button"
+                        class="relative flex w-full flex-col gap-3 border-b px-4 py-4 text-left transition-colors last:border-b-0 hover:bg-muted/70 focus-visible:z-10 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+                        :class="
+                            selectedInstance?.id === instance.id
+                                ? 'bg-accent/60'
+                                : ''
+                        "
+                        :aria-pressed="selectedInstance?.id === instance.id"
+                        @click="choose(instance)"
+                    >
+                        <span
+                            v-if="selectedInstance?.id === instance.id"
+                            class="absolute inset-y-0 left-0 w-0.5 bg-schedule"
+                            aria-hidden="true"
+                        />
+                        <span class="flex items-center justify-between gap-2">
+                            <span
+                                class="font-schedule text-xs text-muted-foreground"
+                                >VERSION {{ instance.version_number }}</span
+                            >
+                            <Badge
+                                variant="outline"
+                                :class="statusClass(instance.status)"
+                                >{{
+                                    instance.can_decide
+                                        ? 'Your review'
+                                        : statusLabel(instance.status)
+                                }}</Badge
+                            >
+                        </span>
+                        <span class="min-w-0">
+                            <span class="block font-semibold break-words">{{
+                                instance.timetable_name
+                            }}</span>
+                            <span
+                                class="mt-1 block text-xs text-muted-foreground"
+                                >{{ instance.workflow_name }}</span
+                            >
+                        </span>
+                        <span
+                            class="flex flex-wrap items-center justify-between gap-1 text-xs text-muted-foreground"
+                        >
+                            <span>{{ instance.submitter_name }}</span>
+                            <span>{{ formatDate(instance.submitted_at) }}</span>
+                        </span>
+                    </button>
+                </div>
+                <div v-else class="px-4 py-8 text-sm text-muted-foreground">
+                    {{
+                        search
+                            ? 'No requests match your search.'
+                            : filter === 'pending'
+                              ? 'No pending requests.'
+                              : 'No completed reviews.'
+                    }}
+                    <Button
+                        v-if="search"
+                        variant="link"
+                        class="mt-2 block h-auto p-0"
+                        @click="search = ''"
+                        >Clear search</Button
+                    >
+                </div>
+                <div
+                    class="flex items-start gap-2 border-t px-4 py-3 text-xs leading-5 text-muted-foreground"
+                >
+                    <ClipboardCheck class="mt-0.5 size-4 shrink-0" />
+                    <p>
+                        Approval records stay with the submitted version.
+                        Publishing is a separate step.
+                    </p>
+                </div>
+            </section>
 
             <section
                 v-if="selectedInstance"
-                class="space-y-6 rounded-lg border bg-card p-5 text-card-foreground sm:p-7"
+                aria-label="Selected approval request"
+                class="min-w-0 space-y-6 p-5 text-card-foreground sm:p-6"
             >
                 <div
                     class="flex flex-col justify-between gap-4 sm:flex-row sm:items-start"
@@ -277,7 +367,9 @@ defineOptions({
                         >
                             Review request
                         </p>
-                        <h2 class="mt-2 text-2xl font-semibold tracking-tight">
+                        <h2
+                            class="mt-2 text-xl font-semibold tracking-tight break-words"
+                        >
                             {{ selectedInstance.timetable_name }}
                         </h2>
                         <p class="mt-2 text-sm text-muted-foreground">
@@ -293,6 +385,20 @@ defineOptions({
                         >{{ statusLabel(selectedInstance.status) }}</Badge
                     >
                 </div>
+                <Button variant="outline" size="sm" as-child>
+                    <Link
+                        :href="
+                            showTimetable(
+                                [
+                                    organization?.slug ?? '',
+                                    selectedInstance.timetable_id,
+                                ],
+                                { query: { version_id: selectedInstance.id } },
+                            ).url
+                        "
+                        >Open timetable <ArrowRight
+                    /></Link>
+                </Button>
                 <div
                     class="grid gap-3 rounded-md border bg-muted/30 p-4 text-sm sm:grid-cols-3"
                 >
@@ -324,7 +430,7 @@ defineOptions({
                     <h3
                         class="font-schedule text-xs font-semibold tracking-[0.16em] text-muted-foreground uppercase"
                     >
-                        Status timeline
+                        Approval progress
                     </h3>
                     <ol class="mt-4 space-y-0">
                         <li
@@ -442,7 +548,7 @@ defineOptions({
                             <CircleAlert class="size-4" />
                         </div>
                         <div>
-                            <h3 class="font-semibold">Your decision is due</h3>
+                            <h3 class="font-semibold">Record your decision</h3>
                             <p
                                 class="mt-1 text-sm leading-6 text-muted-foreground"
                             >
@@ -452,6 +558,7 @@ defineOptions({
                         </div>
                     </div>
                     <Form
+                        :key="selectedInstance.id"
                         v-bind="
                             decide.form([
                                 organization?.slug ?? '',
@@ -461,6 +568,10 @@ defineOptions({
                         class="mt-5 space-y-4"
                         v-slot="{ errors, processing }"
                     >
+                        <ValidationSummary
+                            :errors="errors"
+                            title="Your decision could not be saved"
+                        />
                         <input
                             type="hidden"
                             name="idempotency_key"
@@ -526,6 +637,57 @@ defineOptions({
                     This request is visible for context, but the active step is
                     assigned to another eligible approver.
                 </div>
+            </section>
+            <section
+                v-else
+                class="flex min-h-80 flex-col items-center justify-center gap-4 p-6 text-center sm:p-10"
+                aria-label="Approval review"
+            >
+                <div
+                    class="grid size-14 place-items-center rounded-xl border border-available/25 bg-available/10 text-available"
+                >
+                    <ClipboardCheck class="size-7" />
+                </div>
+                <div>
+                    <p class="font-schedule text-xs text-muted-foreground">
+                        {{
+                            search
+                                ? 'SEARCH RESULTS'
+                                : filter === 'pending'
+                                  ? 'REVIEW QUEUE CLEAR'
+                                  : 'DECISION HISTORY'
+                        }}
+                    </p>
+                    <h2 class="mt-2 text-xl font-semibold tracking-tight">
+                        {{
+                            search
+                                ? 'No matching requests'
+                                : filter === 'pending'
+                                  ? 'Nothing is waiting on you'
+                                  : 'No approval history yet'
+                        }}
+                    </h2>
+                    <p
+                        class="mt-2 max-w-md text-sm leading-6 text-muted-foreground"
+                    >
+                        {{
+                            search
+                                ? 'Try a timetable name, workflow, or submitter.'
+                                : filter === 'pending'
+                                  ? 'Submitted timetables will appear here when they are ready for review.'
+                                  : 'Completed reviews will appear here with their decisions and comments.'
+                        }}
+                    </p>
+                </div>
+                <Button v-if="search" variant="outline" @click="search = ''"
+                    >Clear search</Button
+                >
+                <Button
+                    v-else-if="filter === 'history'"
+                    variant="outline"
+                    @click="filter = 'pending'"
+                    >View pending requests</Button
+                >
             </section>
         </div>
     </div>

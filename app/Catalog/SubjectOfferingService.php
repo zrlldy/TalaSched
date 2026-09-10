@@ -99,6 +99,46 @@ class SubjectOfferingService
         });
     }
 
+    public function addMissingComponentSnapshots(
+        Organization $organization,
+        SubjectOffering $offering,
+        ?User $actor = null,
+    ): SubjectOffering {
+        return $this->tenantContext->run($organization, function () use ($organization, $offering, $actor): SubjectOffering {
+            return DB::transaction(function () use ($organization, $offering, $actor): SubjectOffering {
+                $this->lockOrganization($organization);
+                $lockedOffering = $this->lockOffering($organization, $offering);
+                $components = SubjectComponent::query()
+                    ->where('organization_id', $organization->getKey())
+                    ->where('subject_id', $lockedOffering->subject_id)
+                    ->orderBy('id')
+                    ->lockForUpdate()
+                    ->get();
+
+                if ($components->isEmpty()) {
+                    throw ValidationException::withMessages([
+                        'components' => 'Add lecture or lab requirements to this subject first, then return to the offering.',
+                    ]);
+                }
+
+                $existingIds = $lockedOffering->components()->pluck('subject_component_id');
+
+                foreach ($components->whereNotIn('id', $existingIds) as $source) {
+                    $component = $this->createSnapshot($organization, $lockedOffering, $source);
+                    $this->auditLogger->record(
+                        action: 'subject_offering.component_snapshot_created',
+                        organization: $organization,
+                        actor: $actor,
+                        subject: $lockedOffering,
+                        after: $this->componentSnapshot($component),
+                    );
+                }
+
+                return $lockedOffering->load('components');
+            }, attempts: 3);
+        });
+    }
+
     public function addComponentSnapshot(
         Organization $organization,
         SubjectOffering $offering,

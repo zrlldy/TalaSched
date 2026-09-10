@@ -74,6 +74,7 @@ class AcademicYearLifecycleService
                 $this->lockOrganization($organization);
                 $lockedYear = $this->lockYear($organization, $academicYear);
                 $this->assertDraft($lockedYear);
+                $this->assertPeriodDetails($lockedYear, $sequence, $startsOn, $endsOn);
                 $this->assertNoOverlappingPeriod($organization, $lockedYear, $startsOn, $endsOn);
 
                 $academicPeriod = AcademicPeriod::query()->create([
@@ -232,6 +233,35 @@ class AcademicYearLifecycleService
         throw ValidationException::withMessages([
             'academic_year' => __('Only draft academic years can be configured.'),
         ]);
+    }
+
+    private function assertPeriodDetails(AcademicYear $academicYear, int $sequence, CarbonInterface $startsOn, CarbonInterface $endsOn): void
+    {
+        $errors = [];
+
+        if ($startsOn->lt($academicYear->starts_on) || $startsOn->gt($academicYear->ends_on)) {
+            $errors['starts_on'] = __('The period start date must fall within the academic year.');
+        }
+
+        if ($endsOn->lt($academicYear->starts_on) || $endsOn->gt($academicYear->ends_on)) {
+            $errors['ends_on'] = __('The period end date must fall within the academic year.');
+        } elseif ($endsOn->lt($startsOn)) {
+            $errors['ends_on'] = __('The period must end on or after its start date.');
+        }
+
+        if ($sequence < 1) {
+            $errors['sequence'] = __('Period sequences must start at one.');
+        } elseif (AcademicPeriod::query()
+            ->where('organization_id', $academicYear->organization_id)
+            ->where('academic_year_id', $academicYear->getKey())
+            ->where('sequence', $sequence)
+            ->exists()) {
+            $errors['sequence'] = __('This sequence is already used in the academic year. Choose an unused sequence number.');
+        }
+
+        if ($errors !== []) {
+            throw ValidationException::withMessages($errors);
+        }
     }
 
     private function assertNoOverlappingPeriod(
