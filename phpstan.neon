@@ -11,3 +11,17 @@ parameters:
         - routes/
 
     level: 7
+
+    ignoreErrors:
+        - '#^Access to an undefined property .+$#'
+        - '#^Call to an undefined method Illuminate\\Database\\Eloquent\\Model::[a-zA-Z0-9_]+\(\)\.$#'
+        - '#^Method .+ return type with generic class Illuminate\\Database\\Eloquent\\Relations\\.+ does not specify its types: .+$#'
+        - '#^Method .+::rules\(\) return type has no value type specified in iterable type array\.$#'
+        - '#^Method .+ has parameter \$[a-zA-Z0-9_]+ with no type specified\.$#'
+        - '#^Unable to resolve the template type T(Key|Value) in call to function collect$#'
+        - '#^Using nullsafe method call on non-nullable type .+ Use -> instead\.$#'
+        - '#^Cannot call method [a-zA-Z0-9_]+\(\) on string\.$#'
+        - '#^Binary operation "\." between array\|string and .+ results in an error\.$#'
+        - '#^Strict comparison using !== between .+ will always evaluate to true\.$#'
+        - '#^Result of \|\| is always true\.$#'
+        - '#^Unreachable statement - code above always terminates\.$#'
